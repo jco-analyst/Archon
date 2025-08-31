@@ -280,3 +280,4 @@ When connected to Cursor/Windsurf:
 
 ADDITIONAL CONTEXT FOR SPECIFICALLY HOW TO USE ARCHON ITSELF:
 @CLAUDE-ARCHON.md
+- when making any changes to the core code, after applying all the changes please run "docker compose down" and "docker compose up --build -d" rebuild, then use playwright mcp to look at http://localhost:3737/settings to see if everything is working. Please use this workflow

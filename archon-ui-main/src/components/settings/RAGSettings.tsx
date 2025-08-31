@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Settings, Check, Save, Loader, ChevronDown, ChevronUp, Zap, Database } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
@@ -47,7 +47,51 @@ export const RAGSettings = ({
   const [saving, setSaving] = useState(false);
   const [showCrawlingSettings, setShowCrawlingSettings] = useState(false);
   const [showStorageSettings, setShowStorageSettings] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<Array<{name: string, size?: number}>>([]);
+  const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
   const { showToast } = useToast();
+  // Function to fetch available Ollama models
+  const fetchOllamaModels = async () => {
+    try {
+      setLoadingOllamaModels(true);
+      const baseUrl = ragSettings.EMBEDDING_BASE_URL || 'http://localhost:11434';
+      const response = await fetch(`${baseUrl}/api/tags`);
+      if (response.ok) {
+        const data = await response.json();
+        setOllamaModels(data.models || []);
+      } else {
+        console.warn('Failed to fetch Ollama models');
+        setOllamaModels([]);
+      }
+    } catch (error) {
+      console.warn('Error fetching Ollama models:', error);
+      setOllamaModels([]);
+    } finally {
+      setLoadingOllamaModels(false);
+    }
+  };
+
+  // Fetch Ollama models when embedding provider is Ollama
+  useEffect(() => {
+    const embeddingProvider = ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER;
+    if (embeddingProvider === 'ollama') {
+      fetchOllamaModels();
+    }
+  }, [ragSettings.EMBEDDING_PROVIDER, ragSettings.LLM_PROVIDER, ragSettings.EMBEDDING_BASE_URL]);
+
+  // Handle save functionality
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await credentialsService.updateRagSettings(ragSettings);
+      showToast('Settings saved successfully!', 'success');
+    } catch (error) {
+      showToast('Failed to save settings', 'error');
+      console.error('Error saving settings:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
   return <Card accentColor="green" className="overflow-hidden p-8">
         {/* Description */}
         <p className="text-sm text-gray-600 dark:text-zinc-400 mb-6">
@@ -119,18 +163,44 @@ export const RAGSettings = ({
               />
             </div>
             <div>
-              <Input
-                label="Embedding Model"
-                value={ragSettings.EMBEDDING_MODEL || ''}
-                onChange={e => setRagSettings({
-                  ...ragSettings,
-                  EMBEDDING_MODEL: e.target.value
-                })}
-                placeholder={getEmbeddingPlaceholder(ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER || 'openai')}
-                accentColor="blue"
-              />
+              {(ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER) === 'ollama' ? (
+                <Select
+                  label="Embedding Model"
+                  value={ragSettings.EMBEDDING_MODEL || ''}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    EMBEDDING_MODEL: e.target.value
+                  })}
+                  accentColor="blue"
+                  options={[
+                    ...(ollamaModels.map(model => ({
+                      value: model.name,
+                      label: model.name + (model.size ? ` (${Math.round(model.size / 1024 / 1024 / 1024 * 10) / 10}GB)` : '')
+                    }))),
+                    // Default options if no models found
+                    ...(ollamaModels.length === 0 ? [
+                      { value: 'qwen3-embedding-4b:q5_k_m', label: 'qwen3-embedding-4b:q5_k_m (Recommended)' },
+                      { value: 'nomic-embed-text', label: 'nomic-embed-text' },
+                      { value: 'mxbai-embed-large', label: 'mxbai-embed-large' }
+                    ] : [])
+                  ]}
+                  disabled={loadingOllamaModels}
+                  placeholder={loadingOllamaModels ? "Loading models..." : "Select embedding model"}
+                />
+              ) : (
+                <Input
+                  label="Embedding Model"
+                  value={ragSettings.EMBEDDING_MODEL || ''}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    EMBEDDING_MODEL: e.target.value
+                  })}
+                  placeholder={getEmbeddingPlaceholder(ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER || 'openai')}
+                  accentColor="blue"
+                />
+              )}
             </div>
-            {ragSettings.EMBEDDING_PROVIDER === 'ollama' && (
+            {(ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER) === 'ollama' && (
               <div>
                 <Input
                   label="Embedding Base URL"
@@ -146,32 +216,6 @@ export const RAGSettings = ({
             )}
           </div>
         </div>
-          <div className="flex items-end">
-            <Button 
-              variant="outline" 
-              accentColor="green" 
-              icon={saving ? <Loader className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
-              className="w-full whitespace-nowrap"
-              size="md"
-              onClick={async () => {
-                try {
-                  setSaving(true);
-                  await credentialsService.updateRagSettings(ragSettings);
-                  showToast('RAG settings saved successfully!', 'success');
-                } catch (err) {
-                  console.error('Failed to save RAG settings:', err);
-                  showToast('Failed to save settings', 'error');
-                } finally {
-                  setSaving(false);
-                }
-              }}
-              disabled={saving}
-            >
-              {saving ? 'Saving...' : 'Save Settings'}
-            </Button>
-          </div>
-        </div>
-        
         {/* Second row: Contextual Embeddings, Max Workers, and description */}
         <div className="grid grid-cols-8 gap-4 mb-4 p-4 rounded-lg border border-green-500/20 shadow-[0_2px_8px_rgba(34,197,94,0.1)]">
           <div className="col-span-4">
@@ -505,7 +549,35 @@ export const RAGSettings = ({
             </div>
           )}
         </div>
-    </Card>;
+
+        {/* Save Button Section */}
+        <div className="flex justify-end pt-4 border-t border-green-500/10 mt-6">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg
+              hover:from-green-600 hover:to-green-700 disabled:from-gray-400 disabled:to-gray-500
+              disabled:cursor-not-allowed transition-all duration-200 font-medium
+              shadow-lg shadow-green-500/25 hover:shadow-green-500/40
+              disabled:shadow-none flex items-center"
+          >
+            {saving ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save size={16} className="mr-2" />
+                Save Settings
+              </>
+            )}
+          </button>
+        </div>
+    </Card>
 };
 
 // Helper functions for model placeholders
