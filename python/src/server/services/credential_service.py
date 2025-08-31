@@ -408,14 +408,21 @@ class CredentialService:
             # Get RAG strategy settings (where UI saves provider selection)
             rag_settings = await self.get_credentials_by_category("rag_strategy")
 
-            # Get the selected provider
-            provider = rag_settings.get("LLM_PROVIDER", "openai")
+            # Get the selected provider based on service type
+            if service_type == "embedding":
+                # Use separate embedding provider if set, otherwise fall back to LLM provider
+                provider = rag_settings.get("EMBEDDING_PROVIDER") or rag_settings.get("LLM_PROVIDER", "openai")
+                base_url_key = "EMBEDDING_BASE_URL"
+            else:
+                # Use LLM provider for chat/completion
+                provider = rag_settings.get("LLM_PROVIDER", "openai")
+                base_url_key = "LLM_BASE_URL"
 
             # Get API key for this provider
             api_key = await self._get_provider_api_key(provider)
 
-            # Get base URL if needed
-            base_url = self._get_provider_base_url(provider, rag_settings)
+            # Get base URL if needed - check service-specific URL first, then generic
+            base_url = rag_settings.get(base_url_key) or self._get_provider_base_url(provider, rag_settings)
 
             # Get models
             chat_model = rag_settings.get("MODEL_CHOICE", "")
@@ -427,19 +434,27 @@ class CredentialService:
                 "base_url": base_url,
                 "chat_model": chat_model,
                 "embedding_model": embedding_model,
+                "service_type": service_type,  # Include for debugging
             }
 
         except Exception as e:
             logger.error(f"Error getting active provider for {service_type}: {e}")
             # Fallback to environment variable
-            provider = os.getenv("LLM_PROVIDER", "openai")
+            fallback_provider = "openai"
+            if service_type == "embedding":
+                fallback_provider = os.getenv("EMBEDDING_PROVIDER", "openai")
+            else:
+                fallback_provider = os.getenv("LLM_PROVIDER", "openai")
+                
             return {
-                "provider": provider,
+                "provider": fallback_provider,
                 "api_key": os.getenv("OPENAI_API_KEY"),
                 "base_url": None,
                 "chat_model": "",
                 "embedding_model": "",
+                "service_type": service_type,
             }
+
 
     async def _get_provider_api_key(self, provider: str) -> str | None:
         """Get API key for a specific provider."""
@@ -511,8 +526,10 @@ async def initialize_credentials() -> None:
     # LLM provider credentials (for sync client support)
     provider_credentials = [
         "GOOGLE_API_KEY",  # Google Gemini API key
-        "LLM_PROVIDER",  # Selected provider
-        "LLM_BASE_URL",  # Ollama base URL
+        "LLM_PROVIDER",  # Selected chat provider
+        "LLM_BASE_URL",  # Chat provider base URL (e.g., Ollama)
+        "EMBEDDING_PROVIDER",  # Selected embedding provider (can be different from LLM_PROVIDER)
+        "EMBEDDING_BASE_URL",  # Embedding provider base URL
         "EMBEDDING_MODEL",  # Custom embedding model
         "MODEL_CHOICE",  # Chat model for sync contexts
     ]

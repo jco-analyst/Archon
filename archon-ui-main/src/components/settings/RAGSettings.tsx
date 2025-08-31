@@ -17,6 +17,8 @@ interface RAGSettingsProps {
     USE_RERANKING: boolean;
     LLM_PROVIDER?: string;
     LLM_BASE_URL?: string;
+    EMBEDDING_PROVIDER?: string;
+    EMBEDDING_BASE_URL?: string;
     EMBEDDING_MODEL?: string;
     // Crawling Performance Settings
     CRAWL_BATCH_SIZE?: number;
@@ -53,38 +55,97 @@ export const RAGSettings = ({
           knowledge retrieval.
         </p>
         
-        {/* Provider Selection Row */}
-        <div className="grid grid-cols-3 gap-4 mb-4">
-          <div>
-            <Select
-              label="LLM Provider"
-              value={ragSettings.LLM_PROVIDER || 'openai'}
-              onChange={e => setRagSettings({
-                ...ragSettings,
-                LLM_PROVIDER: e.target.value
-              })}
-              accentColor="green"
-              options={[
-                { value: 'openai', label: 'OpenAI' },
-                { value: 'google', label: 'Google Gemini' },
-                { value: 'ollama', label: 'Ollama (Coming Soon)' },
-              ]}
-            />
-          </div>
-          {ragSettings.LLM_PROVIDER === 'ollama' && (
+        {/* Chat Provider Section */}
+        <div className="mb-6 p-4 rounded-lg border border-green-500/20 bg-gradient-to-r from-green-500/5 to-green-600/5">
+          <h3 className="font-semibold text-gray-800 dark:text-white mb-3">Chat Provider Settings</h3>
+          <div className="grid grid-cols-3 gap-4">
             <div>
-              <Input
-                label="Ollama Base URL"
-                value={ragSettings.LLM_BASE_URL || 'http://localhost:11434/v1'}
-                onChange={e => setRagSettings({
-                  ...ragSettings,
-                  LLM_BASE_URL: e.target.value
-                })}
-                placeholder="http://localhost:11434/v1"
+              <Select
+                label="Chat Provider"
+                value={ragSettings.LLM_PROVIDER || 'openai'}
+                onChange={e => handleChatProviderChange(e.target.value, ragSettings, setRagSettings)}
                 accentColor="green"
+                options={[
+                  { value: 'openai', label: 'OpenAI' },
+                  { value: 'google', label: 'Google Gemini' },
+                  { value: 'ollama', label: 'Ollama' },
+                ]}
               />
             </div>
-          )}
+            <div>
+              <Input 
+                label="Chat Model" 
+                value={ragSettings.MODEL_CHOICE || ''} 
+                onChange={e => setRagSettings({
+                  ...ragSettings,
+                  MODEL_CHOICE: e.target.value
+                })} 
+                placeholder={getModelPlaceholder(ragSettings.LLM_PROVIDER || 'openai')}
+                accentColor="green" 
+              />
+            </div>
+            {ragSettings.LLM_PROVIDER === 'ollama' && (
+              <div>
+                <Input
+                  label="Chat Base URL"
+                  value={ragSettings.LLM_BASE_URL || 'http://localhost:11434/v1'}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    LLM_BASE_URL: e.target.value
+                  })}
+                  placeholder="http://localhost:11434/v1"
+                  accentColor="green"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Embedding Provider Section */}
+        <div className="mb-6 p-4 rounded-lg border border-blue-500/20 bg-gradient-to-r from-blue-500/5 to-blue-600/5">
+          <h3 className="font-semibold text-gray-800 dark:text-white mb-3">Embedding Provider Settings</h3>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <Select
+                label="Embedding Provider"
+                value={ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER || 'openai'}
+                onChange={e => handleEmbeddingProviderChange(e.target.value, ragSettings, setRagSettings)}
+                accentColor="blue"
+                options={[
+                  { value: 'openai', label: 'OpenAI' },
+                  { value: 'google', label: 'Google Gemini' },
+                  { value: 'ollama', label: 'Ollama' },
+                ]}
+              />
+            </div>
+            <div>
+              <Input
+                label="Embedding Model"
+                value={ragSettings.EMBEDDING_MODEL || ''}
+                onChange={e => setRagSettings({
+                  ...ragSettings,
+                  EMBEDDING_MODEL: e.target.value
+                })}
+                placeholder={getEmbeddingPlaceholder(ragSettings.EMBEDDING_PROVIDER || ragSettings.LLM_PROVIDER || 'openai')}
+                accentColor="blue"
+              />
+            </div>
+            {ragSettings.EMBEDDING_PROVIDER === 'ollama' && (
+              <div>
+                <Input
+                  label="Embedding Base URL"
+                  value={ragSettings.EMBEDDING_BASE_URL || 'http://localhost:11434/v1'}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    EMBEDDING_BASE_URL: e.target.value
+                  })}
+                  placeholder="http://localhost:11434/v1"
+                  accentColor="blue"
+                />
+              </div>
+            )}
+          </div>
+        </div>
           <div className="flex items-end">
             <Button 
               variant="outline" 
@@ -108,34 +169,6 @@ export const RAGSettings = ({
             >
               {saving ? 'Saving...' : 'Save Settings'}
             </Button>
-          </div>
-        </div>
-
-        {/* Model Settings Row */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div>
-            <Input 
-              label="Chat Model" 
-              value={ragSettings.MODEL_CHOICE} 
-              onChange={e => setRagSettings({
-                ...ragSettings,
-                MODEL_CHOICE: e.target.value
-              })} 
-              placeholder={getModelPlaceholder(ragSettings.LLM_PROVIDER || 'openai')}
-              accentColor="green" 
-            />
-          </div>
-          <div>
-            <Input
-              label="Embedding Model"
-              value={ragSettings.EMBEDDING_MODEL || ''}
-              onChange={e => setRagSettings({
-                ...ragSettings,
-                EMBEDDING_MODEL: e.target.value
-              })}
-              placeholder={getEmbeddingPlaceholder(ragSettings.LLM_PROVIDER || 'openai')}
-              accentColor="green"
-            />
           </div>
         </div>
         
@@ -488,20 +521,77 @@ function getModelPlaceholder(provider: string): string {
       return 'e.g., gpt-4o-mini';
   }
 }
-
 function getEmbeddingPlaceholder(provider: string): string {
   switch (provider) {
     case 'openai':
       return 'Default: text-embedding-3-small';
     case 'ollama':
-      return 'e.g., nomic-embed-text';
+      return 'e.g., qwen3-embedding-4b:q5_k_m, nomic-embed-text';
     case 'google':
       return 'e.g., text-embedding-004';
     default:
       return 'Default: text-embedding-3-small';
   }
 }
+// Helper functions for default model values
+function getDefaultChatModel(provider: string): string {
+  switch (provider) {
+    case 'openai':
+      return 'gpt-4o-mini';
+    case 'ollama':
+      return 'llama3.1:8b';
+    case 'google':
+      return 'gemini-1.5-flash';
+    default:
+      return 'gpt-4o-mini';
+  }
+}
 
+function getDefaultEmbeddingModel(provider: string): string {
+  switch (provider) {
+    case 'openai':
+      return 'text-embedding-3-small';
+    case 'ollama':
+      return 'qwen3-embedding-4b:q5_k_m';
+    case 'google':
+      return 'text-embedding-004';
+    default:
+      return 'text-embedding-3-small';
+  }
+}
+
+// Handler for provider changes that updates model defaults
+// Handler for chat provider changes
+function handleChatProviderChange(provider: string, ragSettings: any, setRagSettings: any): void {
+  setRagSettings({
+    ...ragSettings,
+    LLM_PROVIDER: provider,
+    MODEL_CHOICE: getDefaultChatModel(provider),
+    LLM_BASE_URL: getDefaultBaseUrl(provider)
+  });
+}
+
+// Handler for embedding provider changes
+function handleEmbeddingProviderChange(provider: string, ragSettings: any, setRagSettings: any): void {
+  setRagSettings({
+    ...ragSettings,
+    EMBEDDING_PROVIDER: provider,
+    EMBEDDING_MODEL: getDefaultEmbeddingModel(provider),
+    EMBEDDING_BASE_URL: getDefaultBaseUrl(provider)
+  });
+}
+
+// Helper to get default base URLs
+function getDefaultBaseUrl(provider: string): string {
+  switch (provider) {
+    case 'ollama':
+      return 'http://localhost:11434/v1';
+    case 'openai':
+    case 'google':
+    default:
+      return '';
+  }
+}
 interface CustomCheckboxProps {
   id: string;
   checked: boolean;

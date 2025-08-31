@@ -173,8 +173,8 @@ async def get_embedding_model(provider: str | None = None) -> str:
         if provider_name == "openai":
             return "text-embedding-3-small"
         elif provider_name == "ollama":
-            # Ollama default embedding model
-            return "nomic-embed-text"
+            # Ollama default embedding model - now using Qwen3 as preferred
+            return "qwen3-embedding-4b:q5_k_m"
         elif provider_name == "google":
             # Google's embedding model
             return "text-embedding-004"
@@ -186,3 +186,4 @@ async def get_embedding_model(provider: str | None = None) -> str:
         logger.error(f"Error getting embedding model: {e}")
         # Fallback to OpenAI default
         return "text-embedding-3-small"
+
