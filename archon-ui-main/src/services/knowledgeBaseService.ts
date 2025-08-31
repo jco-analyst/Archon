@@ -67,10 +67,6 @@ export interface CrawlRequest {
   }
 }
 
-export interface UploadMetadata {
-  knowledge_type?: 'technical' | 'business'
-  tags?: string[]
-}
 
 export interface SearchOptions {
   knowledge_type?: 'technical' | 'business'
@@ -242,33 +238,6 @@ class KnowledgeBaseService {
     }>(endpoint);
   }
 
-  /**
-   * Upload a document to the knowledge base with progress tracking
-   */
-  async uploadDocument(file: File, metadata: UploadMetadata = {}) {
-    const formData = new FormData()
-    formData.append('file', file)
-    
-    // Send fields as expected by backend API
-    if (metadata.knowledge_type) {
-      formData.append('knowledge_type', metadata.knowledge_type)
-    }
-    if (metadata.tags && metadata.tags.length > 0) {
-      formData.append('tags', JSON.stringify(metadata.tags))
-    }
-    
-    const response = await fetch(`${API_BASE_URL}/documents/upload`, {
-      method: 'POST',
-      body: formData
-    })
-
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || `HTTP ${response.status}`)
-    }
-
-    return response.json()
-  }
 
   /**
    * Start crawling a URL with metadata

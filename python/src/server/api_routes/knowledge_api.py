@@ -3,9 +3,9 @@ Knowledge Management API Module
 
 This module handles all knowledge base operations including:
 - Crawling and indexing web content
-- Document upload and processing
 - RAG (Retrieval Augmented Generation) queries
 - Knowledge item management and search
+- Document chunk browsing and filtering
 - Real-time progress tracking via WebSockets
 """
 
@@ -16,11 +16,10 @@ import uuid
 from datetime import datetime
 
 from typing import Optional
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..utils import get_supabase_client
-from ..services.storage import DocumentStorageService
 from ..services.search.rag_service import RAGService
 from ..services.knowledge import KnowledgeItemService, DatabaseMetricsService
 from ..services.crawling import CrawlOrchestrationService
@@ -28,7 +27,6 @@ from ..services.crawler_manager import get_crawler
 
 # Import unified logging
 from ..config.logfire_config import get_logger, safe_logfire_error, safe_logfire_info
-from ..utils.document_processing import extract_text_from_document
 
 # Get logger for this module
 logger = get_logger(__name__)
@@ -681,203 +679,6 @@ async def _perform_crawl_with_progress(progress_id: str, request: KnowledgeItemR
                 )
 
 
-@router.post("/documents/upload")
-async def upload_document(
-    file: UploadFile = File(...),
-    tags: str | None = Form(None),
-    knowledge_type: str = Form("technical"),
-):
-    """Upload and process a document with progress tracking."""
-    try:
-        safe_logfire_info(
-            f"Starting document upload | filename={file.filename} | content_type={file.content_type} | knowledge_type={knowledge_type}"
-        )
-
-        # Generate unique progress ID
-        progress_id = str(uuid.uuid4())
-
-        # Parse tags
-        tag_list = json.loads(tags) if tags else []
-
-        # Read file content immediately to avoid closed file issues
-        file_content = await file.read()
-        file_metadata = {
-            "filename": file.filename,
-            "content_type": file.content_type,
-            "size": len(file_content),
-        }
-        # Start progress tracking
-        await start_crawl_progress(
-            progress_id,
-            {
-                "progressId": progress_id,
-                "status": "starting",
-                "percentage": 0,
-                "currentUrl": f"file://{file.filename}",
-                "logs": [f"Starting upload of {file.filename}"],
-                "uploadType": "document",
-                "fileName": file.filename,
-                "fileType": file.content_type,
-            },
-        )
-        # Start background task for processing with file content and metadata
-        task = asyncio.create_task(
-            _perform_upload_with_progress(
-                progress_id, file_content, file_metadata, tag_list, knowledge_type
-            )
-        )
-        # Track the task for cancellation support
-        active_crawl_tasks[progress_id] = task
-        safe_logfire_info(
-            f"Document upload started successfully | progress_id={progress_id} | filename={file.filename}"
-        )
-        return {
-            "success": True,
-            "progressId": progress_id,
-            "message": "Document upload started",
-            "filename": file.filename,
-        }
-
-    except Exception as e:
-        safe_logfire_error(
-            f"Failed to start document upload | error={str(e)} | filename={file.filename} | error_type={type(e).__name__}"
-        )
-        raise HTTPException(status_code=500, detail={"error": str(e)})
-
-
-async def _perform_upload_with_progress(
-    progress_id: str,
-    file_content: bytes,
-    file_metadata: dict,
-    tag_list: list[str],
-    knowledge_type: str,
-):
-    """Perform document upload with progress tracking using service layer."""
-    # Add a small delay to allow frontend WebSocket subscription to be established
-    # This prevents the "Room has 0 subscribers" issue
-    await asyncio.sleep(1.0)
-
-    # Create cancellation check function for document uploads
-    def check_upload_cancellation():
-        """Check if upload task has been cancelled."""
-        task = active_crawl_tasks.get(progress_id)
-        if task and task.cancelled():
-            raise asyncio.CancelledError("Document upload was cancelled by user")
-
-    # Import ProgressMapper to prevent progress from going backwards
-    from ..services.crawling.progress_mapper import ProgressMapper
-    progress_mapper = ProgressMapper()
-
-    try:
-        filename = file_metadata["filename"]
-        content_type = file_metadata["content_type"]
-        # file_size = file_metadata['size']  # Not used currently
-
-        safe_logfire_info(
-            f"Starting document upload with progress tracking | progress_id={progress_id} | filename={filename} | content_type={content_type}"
-        )
-
-        # Socket.IO handles connection automatically - no need to wait
-
-        # Extract text from document with progress - use mapper for consistent progress
-        mapped_progress = progress_mapper.map_progress("processing", 50)
-        await update_crawl_progress(
-            progress_id,
-            {
-                "status": "processing",
-                "percentage": mapped_progress,
-                "currentUrl": f"file://{filename}",
-                "log": f"Reading {filename}...",
-            },
-        )
-
-        try:
-            extracted_text = extract_text_from_document(file_content, filename, content_type)
-            safe_logfire_info(
-                f"Document text extracted | filename={filename} | extracted_length={len(extracted_text)} | content_type={content_type}"
-            )
-        except Exception as e:
-            await error_crawl_progress(progress_id, f"Failed to extract text: {str(e)}")
-            return
-
-        # Use DocumentStorageService to handle the upload
-        doc_storage_service = DocumentStorageService(get_supabase_client())
-
-        # Generate source_id from filename
-        source_id = f"file_{filename.replace(' ', '_').replace('.', '_')}_{int(time.time())}"
-
-        # Create progress callback that emits to Socket.IO with mapped progress
-        async def document_progress_callback(
-            message: str, percentage: int, batch_info: dict = None
-        ):
-            """Progress callback that emits to Socket.IO with mapped progress"""
-            # Map the document storage progress to overall progress range
-            mapped_percentage = progress_mapper.map_progress("document_storage", percentage)
-
-            progress_data = {
-                "status": "document_storage",
-                "percentage": mapped_percentage,  # Use mapped progress to prevent backwards jumps
-                "currentUrl": f"file://{filename}",
-                "log": message,
-            }
-            if batch_info:
-                progress_data.update(batch_info)
-
-            await update_crawl_progress(progress_id, progress_data)
-
-        # Call the service's upload_document method
-        success, result = await doc_storage_service.upload_document(
-            file_content=extracted_text,
-            filename=filename,
-            source_id=source_id,
-            knowledge_type=knowledge_type,
-            tags=tag_list,
-            progress_callback=document_progress_callback,
-            cancellation_check=check_upload_cancellation,
-        )
-
-        if success:
-            # Complete the upload with 100% progress
-            final_progress = progress_mapper.map_progress("completed", 100)
-            await update_crawl_progress(
-                progress_id,
-                {
-                    "status": "completed",
-                    "percentage": final_progress,
-                    "currentUrl": f"file://{filename}",
-                    "log": "Document upload completed successfully!",
-                },
-            )
-
-            # Also send the completion event with details
-            await complete_crawl_progress(
-                progress_id,
-                {
-                    "chunksStored": result.get("chunks_stored", 0),
-                    "wordCount": result.get("total_word_count", 0),
-                    "sourceId": result.get("source_id"),
-                    "log": "Document upload completed successfully!",
-                },
-            )
-
-            safe_logfire_info(
-                f"Document uploaded successfully | progress_id={progress_id} | source_id={result.get('source_id')} | chunks_stored={result.get('chunks_stored')}"
-            )
-        else:
-            error_msg = result.get("error", "Unknown error")
-            await error_crawl_progress(progress_id, error_msg)
-
-    except Exception as e:
-        error_msg = f"Upload failed: {str(e)}"
-        safe_logfire_error(
-            f"Document upload failed | progress_id={progress_id} | filename={file_metadata.get('filename', 'unknown')} | error={str(e)}"
-        )
-        await error_crawl_progress(progress_id, error_msg)
-    finally:
-        # Clean up task from registry when done (success or failure)
-        if progress_id in active_crawl_tasks:
-            del active_crawl_tasks[progress_id]
-            safe_logfire_info(f"Cleaned up upload task from registry | progress_id={progress_id}")
 
 
 @router.post("/knowledge-items/search")

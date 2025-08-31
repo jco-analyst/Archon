@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { Search, Grid, Plus, Upload, Link as LinkIcon, Brain, Filter, BoxIcon, List, BookOpen, CheckSquare, ChevronDown, X } from 'lucide-react';
+import { Search, Grid, Plus, Link as LinkIcon, Brain, Filter, BoxIcon, List, BookOpen, CheckSquare, ChevronDown, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -576,9 +576,7 @@ export const KnowledgeBasePage = () => {
     crawlProgressService.stopStreaming(data.progressId);
     
     // Show success toast
-    const message = data.uploadType === 'document' 
-      ? `Document "${data.fileName}" uploaded successfully!`
-      : `Crawling completed for ${data.currentUrl}!`;
+    const message = `Crawling completed for ${data.currentUrl}!`;
     showToast(message, 'success');
     
     // Remove from progress items after a brief delay to show completion
@@ -646,8 +644,8 @@ export const KnowledgeBasePage = () => {
       return;
     }
 
-    // Check if we have original crawl parameters, or at least a URL to retry
-    if (!progressItem.originalCrawlParams && !progressItem.originalUploadParams && !progressItem.currentUrl) {
+    // Check if we have original crawl parameters or URL to retry
+    if (!progressItem.originalCrawlParams && !progressItem.currentUrl) {
       showToast('Cannot retry: no URL or parameters found. Please start a new crawl manually.', 'warning');
       return;
     }
@@ -685,35 +683,6 @@ export const KnowledgeBasePage = () => {
           showToast('Crawl restarted successfully', 'success');
         } else {
           showToast('Crawl completed immediately', 'success');
-          loadKnowledgeItems();
-        }
-      } else if (progressItem.originalUploadParams) {
-        // Retry upload
-        showToast('Retrying upload...', 'info');
-        
-        const formData = new FormData();
-        formData.append('file', progressItem.originalUploadParams.file);
-        formData.append('knowledge_type', progressItem.originalUploadParams.knowledge_type || 'technical');
-        
-        if (progressItem.originalUploadParams.tags && progressItem.originalUploadParams.tags.length > 0) {
-          formData.append('tags', JSON.stringify(progressItem.originalUploadParams.tags));
-        }
-        
-        const result = await knowledgeBaseService.uploadDocument(formData);
-        
-        if ((result as any).progressId) {
-          // Start progress tracking with original parameters preserved
-          await handleStartCrawl((result as any).progressId, {
-            currentUrl: `file://${progressItem.originalUploadParams.file.name}`,
-            uploadType: 'document',
-            fileName: progressItem.originalUploadParams.file.name,
-            fileType: progressItem.originalUploadParams.file.type,
-            originalUploadParams: progressItem.originalUploadParams
-          });
-          
-          showToast('Upload restarted successfully', 'success');
-        } else {
-          showToast('Upload completed immediately', 'success');
           loadKnowledgeItems();
         }
       } else if (progressItem.currentUrl && !progressItem.currentUrl.startsWith('file://')) {
@@ -1237,12 +1206,10 @@ const AddKnowledgeModal = ({
   onSuccess,
   onStartCrawl
 }: AddKnowledgeModalProps) => {
-  const [method, setMethod] = useState<'url' | 'file'>('url');
   const [url, setUrl] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [knowledgeType, setKnowledgeType] = useState<'technical' | 'business'>('technical');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [crawlDepth, setCrawlDepth] = useState(2);
   const [showDepthTooltip, setShowDepthTooltip] = useState(false);
@@ -1362,105 +1329,55 @@ const AddKnowledgeModal = ({
     try {
       setLoading(true);
       
-      if (method === 'url') {
-        if (!url.trim()) {
-          showToast('Please enter a URL', 'error');
-          return;
-        }
-        
-        // Validate URL and check domain existence
-        showToast('Validating URL...', 'info');
-        const validation = await validateUrl(url);
-        
-        if (!validation.isValid) {
-          showToast(validation.error || 'Invalid URL', 'error');
-          return;
-        }
-        
-        const formattedUrl = validation.formattedUrl!;
-        setUrl(formattedUrl); // Update the input field to show the corrected URL
-        
-        // Build crawl config if advanced options are configured
-        const crawlConfig = (allowedDomains.length > 0 || excludedDomains.length > 0 || 
-                           includePatterns.length > 0 || excludePatterns.length > 0) ? {
-          allowed_domains: allowedDomains,
-          excluded_domains: excludedDomains,
-          include_patterns: includePatterns,
-          exclude_patterns: excludePatterns
-        } : undefined;
+      if (!url.trim()) {
+        showToast('Please enter a URL', 'error');
+        return;
+      }
+      
+      // Validate URL and check domain existence
+      showToast('Validating URL...', 'info');
+      const validation = await validateUrl(url);
+      
+      if (!validation.isValid) {
+        showToast(validation.error || 'Invalid URL', 'error');
+        return;
+      }
+      
+      const formattedUrl = validation.formattedUrl!;
+      setUrl(formattedUrl); // Update the input field to show the corrected URL
+      
+      // Build crawl config if advanced options are configured
+      const crawlConfig = (allowedDomains.length > 0 || excludedDomains.length > 0 || 
+                         includePatterns.length > 0 || excludePatterns.length > 0) ? {
+        allowed_domains: allowedDomains,
+        excluded_domains: excludedDomains,
+        include_patterns: includePatterns,
+        exclude_patterns: excludePatterns
+      } : undefined;
 
-        const result = await knowledgeBaseService.crawlUrl({
-          url: formattedUrl,
-          knowledge_type: knowledgeType,
-          tags,
-          max_depth: crawlDepth,
-          crawl_config: crawlConfig
+      const result = await knowledgeBaseService.crawlUrl({
+        url: formattedUrl,
+        knowledge_type: knowledgeType,
+        tags,
+        max_depth: crawlDepth,
+        crawl_config: crawlConfig
+      });
+      
+      // Check if result contains a progressId for streaming
+      if ((result as any).progressId) {
+        // Start progress tracking
+        onStartCrawl((result as any).progressId, {
+          status: 'initializing',
+          percentage: 0,
+          currentStep: 'Starting crawl'
         });
         
-        // Crawl URL result received
-        
-        // Check if result contains a progressId for streaming
-        if ((result as any).progressId) {
-          // Got progressId
-          // About to call onStartCrawl function
-          // onStartCrawl function ready
-          
-          // Start progress tracking
-          onStartCrawl((result as any).progressId, {
-            status: 'initializing',
-            percentage: 0,
-            currentStep: 'Starting crawl'
-          });
-          
-          // onStartCrawl called successfully
-          
-          showToast('Crawling started - tracking progress', 'success');
-          onClose(); // Close modal immediately
-        } else {
-          // No progressId in result
-          // Result structure logged
-          
-          // Fallback for non-streaming response
-          showToast((result as any).message || 'Crawling started', 'success');
-          onSuccess();
-        }
+        showToast('Crawling started - tracking progress', 'success');
+        onClose(); // Close modal immediately
       } else {
-        if (!selectedFile) {
-          showToast('Please select a file', 'error');
-          return;
-        }
-        
-        const result = await knowledgeBaseService.uploadDocument(selectedFile, {
-          knowledge_type: knowledgeType,
-          tags
-        });
-        
-        if (result.success && result.progressId) {
-          // Upload started with progressId
-          
-          // Start progress tracking for upload
-          onStartCrawl(result.progressId, {
-            currentUrl: `file://${selectedFile.name}`,
-            percentage: 0,
-            status: 'starting',
-            logs: [`Starting upload of ${selectedFile.name}`],
-            uploadType: 'document',
-            fileName: selectedFile.name,
-            fileType: selectedFile.type
-          });
-          
-          // onStartCrawl called successfully for upload
-          
-          showToast('Document upload started - tracking progress', 'success');
-          onClose(); // Close modal immediately
-        } else {
-          // No progressId in upload result
-          // Upload result structure logged
-          
-          // Fallback for non-streaming response
-          showToast((result as any).message || 'Document uploaded successfully', 'success');
-          onSuccess();
-        }
+        // Fallback for non-streaming response
+        showToast((result as any).message || 'Crawling started', 'success');
+        onSuccess();
       }
     } catch (error) {
       console.error('Failed to add knowledge:', error);
@@ -1499,74 +1416,66 @@ const AddKnowledgeModal = ({
             </label>
           </div>
         </div>
-        {/* Source Type Selection */}
-        <div className="flex gap-4 mb-6">
-          <button onClick={() => setMethod('url')} className={`flex-1 p-4 rounded-md border ${method === 'url' ? 'border-blue-500 text-blue-600 dark:text-blue-500 bg-blue-50 dark:bg-blue-500/5' : 'border-gray-200 dark:border-zinc-900 text-gray-500 dark:text-zinc-400 hover:border-blue-300 dark:hover:border-blue-500/30'} transition flex items-center justify-center gap-2`}>
-            <LinkIcon className="w-4 h-4" />
-            <span>URL / Website</span>
-          </button>
-          <button onClick={() => setMethod('file')} className={`flex-1 p-4 rounded-md border ${method === 'file' ? 'border-pink-500 text-pink-600 dark:text-pink-500 bg-pink-50 dark:bg-pink-500/5' : 'border-gray-200 dark:border-zinc-900 text-gray-500 dark:text-zinc-400 hover:border-pink-300 dark:hover:border-pink-500/30'} transition flex items-center justify-center gap-2`}>
-            <Upload className="w-4 h-4" />
-            <span>Upload File</span>
+        {/* URL Input */}
+        <div className="mb-6">
+          <Input 
+            label="URL to Scrape" 
+            type="url" 
+            value={url} 
+            onChange={e => setUrl(e.target.value)} 
+            placeholder="https://example.com or example.com" 
+            accentColor="blue" 
+          />
+          {url && !url.startsWith('http://') && !url.startsWith('https://') && (
+            <p className="text-amber-600 dark:text-amber-400 text-sm mt-1">
+              ℹ️ Will automatically add https:// prefix
+            </p>
+          )}
+        </div>
+        {/* Crawl Depth */}
+        <div className="mb-6">
+          <label className="block text-gray-600 dark:text-zinc-400 text-sm mb-4">
+            Crawl Depth
+            <button
+              type="button"
+              className="ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              onMouseEnter={() => setShowDepthTooltip(true)}
+              onMouseLeave={() => setShowDepthTooltip(false)}
+            >
+              <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+            {showDepthTooltip && (
+              <div className="absolute z-50 mt-2 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg max-w-xs">
+                <p>• Depth 1: Only the main page</p>
+                <p>• Depth 2: Main page + links on it</p>
+                <p>• Depth 3+: Goes deeper into the site</p>
+              </div>
+            )}
+          </label>
+          <GlassCrawlDepthSelector
+            value={crawlDepth}
+            onChange={setCrawlDepth}
+            min={1}
+            max={5}
+          />
+        </div>
+
+        {/* Advanced Configuration Toggle */}
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={() => setShowAdvancedConfig(!showAdvancedConfig)}
+            className="flex items-center gap-2 text-gray-600 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-300 transition-colors text-sm"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedConfig ? 'rotate-180' : ''}`} />
+            Advanced Domain Configuration
           </button>
         </div>
-        {/* URL Input */}
-        {method === 'url' && <div className="mb-6">
-            <Input 
-              label="URL to Scrape" 
-              type="url" 
-              value={url} 
-              onChange={e => setUrl(e.target.value)} 
-              placeholder="https://example.com or example.com" 
-              accentColor="blue" 
-            />
-            {url && !url.startsWith('http://') && !url.startsWith('https://') && (
-              <p className="text-amber-600 dark:text-amber-400 text-sm mt-1">
-                ℹ️ Will automatically add https:// prefix
-              </p>
-            )}
-          </div>}
-        {/* File Upload */}
-        {method === 'file' && (
-          <div className="mb-6">
-            <label className="block text-gray-600 dark:text-zinc-400 text-sm mb-2">
-              Upload Document
-            </label>
-            <div className="relative">
-              <input 
-                id="file-upload"
-                type="file"
-                accept=".pdf,.md,.doc,.docx,.txt"
-                onChange={e => setSelectedFile(e.target.files?.[0] || null)}
-                className="sr-only"
-              />
-              <label 
-                htmlFor="file-upload"
-                className="flex items-center justify-center gap-3 w-full p-6 rounded-md border-2 border-dashed cursor-pointer transition-all duration-300
-                  bg-blue-500/10 hover:bg-blue-500/20 
-                  border-blue-500/30 hover:border-blue-500/50
-                  text-blue-600 dark:text-blue-400
-                  hover:shadow-[0_0_15px_rgba(59,130,246,0.3)]
-                  backdrop-blur-sm"
-              >
-                <Upload className="w-6 h-6" />
-                <div className="text-center">
-                  <div className="font-medium">
-                    {selectedFile ? selectedFile.name : 'Choose File'}
-                  </div>
-                  <div className="text-sm opacity-75 mt-1">
-                    {selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : 'Click to browse or drag and drop'}
-                  </div>
-                </div>
-              </label>
-            </div>
-            <p className="text-gray-500 dark:text-zinc-600 text-sm mt-2">
-              Supports PDF, MD, DOC up to 10MB
-            </p>
-          </div>
-        )}
-        {/* Crawl Depth - Only for URLs */}
-        {method === 'url' && (
+
+        {/* Advanced Configuration Panel */}
+        {showAdvancedConfig && (
           <div className="mb-6">
             <label className="block text-gray-600 dark:text-zinc-400 text-sm mb-4">
               Crawl Depth
