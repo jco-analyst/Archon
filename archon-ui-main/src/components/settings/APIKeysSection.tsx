@@ -18,11 +18,46 @@ interface CustomCredential {
   isNew?: boolean; // Track if this is a new unsaved credential
 }
 
+// Predefined API key types that Archon uses
+const PREDEFINED_API_KEYS = [
+  {
+    key: 'OPENAI_API_KEY',
+    description: 'OpenAI API key for GPT models and embeddings',
+    category: 'LLM Provider'
+  },
+  {
+    key: 'GOOGLE_API_KEY',
+    description: 'Google Gemini API key for Google AI models',
+    category: 'LLM Provider'
+  },
+  {
+    key: 'CLAUDE_API_KEY',
+    description: 'Anthropic Claude API key for Claude models',
+    category: 'LLM Provider'
+  },
+  {
+    key: 'HUGGINGFACE_TOKEN',
+    description: 'Hugging Face API token for model access',
+    category: 'ML Platform'
+  },
+  {
+    key: 'LOGFIRE_TOKEN',
+    description: 'Logfire token for application monitoring',
+    category: 'Monitoring'
+  },
+  {
+    key: 'SUPABASE_SERVICE_KEY',
+    description: 'Supabase service role key for database access',
+    category: 'Database'
+  }
+];
+
 export const APIKeysSection = () => {
   const [customCredentials, setCustomCredentials] = useState<CustomCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [selectedKeyType, setSelectedKeyType] = useState('');
 
   const { showToast } = useToast();
 
@@ -44,10 +79,10 @@ export const APIKeysSection = () => {
       // Load all credentials
       const allCredentials = await credentialsService.getAllCredentials();
       
-      // Filter to only show API keys (credentials that end with _KEY or _API)
+      // Filter to only show API keys (credentials that end with _KEY or _API or _TOKEN)
       const apiKeys = allCredentials.filter(cred => {
         const key = cred.key.toUpperCase();
-        return key.includes('_KEY') || key.includes('_API') || key.includes('API_');
+        return key.includes('_KEY') || key.includes('_API') || key.includes('API_') || key.includes('_TOKEN') || key.includes('TOKEN_');
       });
       
       // Convert to UI format
@@ -72,19 +107,55 @@ export const APIKeysSection = () => {
     }
   };
 
-  const handleAddNewRow = () => {
-    const newCred: CustomCredential = {
-      key: '',
-      value: '',
-      description: '',
-      originalValue: '',
-      hasChanges: true,
-      is_encrypted: true, // Default to encrypted
-      showValue: true, // Show value for new entries
-      isNew: true
-    };
-    
-    setCustomCredentials([...customCredentials, newCred]);
+  const handleAddCredential = () => {
+    if (!selectedKeyType) {
+      showToast('Please select a credential type first', 'warning');
+      return;
+    }
+
+    if (selectedKeyType === 'custom') {
+      // Add custom key
+      const newCred: CustomCredential = {
+        key: '',
+        value: '',
+        description: '',
+        originalValue: '',
+        hasChanges: true,
+        is_encrypted: true, // Default to encrypted
+        showValue: true, // Show value for new entries
+        isNew: true
+      };
+      
+      setCustomCredentials([...customCredentials, newCred]);
+    } else {
+      // Add predefined key
+      const predefinedKey = PREDEFINED_API_KEYS.find(k => k.key === selectedKeyType);
+      if (!predefinedKey) return;
+
+      // Check if this key already exists
+      const existingKey = customCredentials.find(cred => cred.key === predefinedKey.key);
+      if (existingKey) {
+        showToast(`${predefinedKey.key} already exists`, 'warning');
+        setSelectedKeyType('');
+        return;
+      }
+
+      const newCred: CustomCredential = {
+        key: predefinedKey.key,
+        value: '',
+        description: predefinedKey.description,
+        originalValue: '',
+        hasChanges: true,
+        is_encrypted: true, // Default to encrypted for security
+        showValue: true, // Show value for new entries
+        isNew: true
+      };
+      
+      setCustomCredentials([...customCredentials, newCred]);
+    }
+
+    // Reset the select
+    setSelectedKeyType('');
   };
 
   const updateCredential = (index: number, field: keyof CustomCredential, value: any) => {
@@ -200,6 +271,15 @@ export const APIKeysSection = () => {
     );
   }
 
+  // Group predefined keys by category for optgroups
+  const groupedKeys = PREDEFINED_API_KEYS.reduce((acc, key) => {
+    if (!acc[key.category]) {
+      acc[key.category] = [];
+    }
+    acc[key.category].push(key);
+    return acc;
+  }, {} as Record<string, typeof PREDEFINED_API_KEYS>);
+
   return (
     <Card accentColor="pink" className="p-8">
         <div className="space-y-4">
@@ -295,17 +375,40 @@ export const APIKeysSection = () => {
             ))}
           </div>
 
-          {/* Add credential button */}
+          {/* Add credential section */}
           <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-            <Button
-              variant="outline"
-              onClick={handleAddNewRow}
-              accentColor="pink"
-              size="sm"
-            >
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Add Credential
-            </Button>
+            <div className="flex items-center gap-3">
+              {/* Select dropdown for credential type */}
+              <select
+                value={selectedKeyType}
+                onChange={(e) => setSelectedKeyType(e.target.value)}
+                className="flex-1 px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm"
+              >
+                <option value="">Select credential type...</option>
+                {Object.entries(groupedKeys).map(([category, keys]) => (
+                  <optgroup key={category} label={category}>
+                    {keys.map((keyDef) => (
+                      <option key={keyDef.key} value={keyDef.key}>
+                        {keyDef.key} - {keyDef.description}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value="custom">Custom API Key</option>
+              </select>
+
+              {/* Add button */}
+              <Button
+                variant="outline"
+                onClick={handleAddCredential}
+                accentColor="pink"
+                size="sm"
+                disabled={!selectedKeyType}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                Add Credential
+              </Button>
+            </div>
           </div>
 
           {/* Save all changes button */}

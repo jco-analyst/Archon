@@ -31,9 +31,9 @@ function getChatModelOptions(provider: string): Array<{value: string, label: str
       ];
     case 'localcloudcode':
       return [
-        { value: 'sonnet', label: 'Claude 3.5 Sonnet' },
-        { value: 'haiku', label: 'Claude 3 Haiku' },
-        { value: 'opus', label: 'Claude 3 Opus' },
+        { value: 'sonnet', label: 'Sonnet' },
+        { value: 'haiku', label: 'Haiku' },
+        { value: 'opus', label: 'Opus' },
       ];
     case 'ollama':
       return [
