@@ -6,6 +6,45 @@ import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
 import { useToast } from '../../contexts/ToastContext';
 import { credentialsService } from '../../services/credentialsService';
+// Helper function to get chat model options for each provider
+function getChatModelOptions(provider: string): Array<{value: string, label: string}> {
+  switch (provider) {
+    case 'openai':
+      return [
+        // Tier 1 models
+        { value: 'gpt-5-2025-08-07', label: 'GPT-5 (Tier 1)' },
+        { value: 'gpt-5-chat-latest', label: 'GPT-5 Chat Latest (Tier 1)' },
+        { value: 'gpt-4.1-2025-04-14', label: 'GPT-4.1 (Tier 1)' },
+        { value: 'gpt-4o-2024-11-20', label: 'GPT-4o (Tier 1)' },
+        // Tier 2 models
+        { value: 'gpt-5-mini-2025-08-07', label: 'GPT-5 Mini (Tier 2)' },
+        { value: 'gpt-5-nano-2025-08-07', label: 'GPT-5 Nano (Tier 2)' },
+        { value: 'gpt-4.1-mini-2025-04-14', label: 'GPT-4.1 Mini (Tier 2)' },
+        { value: 'gpt-4.1-nano-2025-04-14', label: 'GPT-4.1 Nano (Tier 2)' },
+      ];
+    case 'google':
+      return [
+        { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+        { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+        { value: 'gemini-pro', label: 'Gemini Pro' },
+        { value: 'gemini-pro-vision', label: 'Gemini Pro Vision' },
+      ];
+    case 'localcloudcode':
+      return [
+        { value: 'sonnet', label: 'Claude 3.5 Sonnet' },
+        { value: 'haiku', label: 'Claude 3 Haiku' },
+        { value: 'opus', label: 'Claude 3 Opus' },
+      ];
+    case 'ollama':
+      return [
+        // No predefined models - user should enter model name manually
+      ];
+    default:
+      return [
+        { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      ];
+  }
+}
 
 interface RAGSettingsProps {
   ragSettings: {
@@ -120,35 +159,47 @@ export const RAGSettings = ({
                   { value: 'openai', label: 'OpenAI' },
                   { value: 'google', label: 'Google Gemini' },
                   { value: 'ollama', label: 'Ollama' },
+                  { value: 'localcloudcode', label: 'Claude Code' },
                 ]}
               />
             </div>
             <div>
-              <Input 
-                label="Chat Model" 
-                value={ragSettings.MODEL_CHOICE || ''} 
-                onChange={e => setRagSettings({
-                  ...ragSettings,
-                  MODEL_CHOICE: e.target.value
-                })} 
-                placeholder={getModelPlaceholder(ragSettings.LLM_PROVIDER || 'openai')}
-                accentColor="green" 
-              />
-            </div>
-            {ragSettings.LLM_PROVIDER === 'ollama' && (
-              <div>
+              {ragSettings.LLM_PROVIDER === 'ollama' ? (
                 <Input
-                  label="Chat Base URL"
-                  value={ragSettings.LLM_BASE_URL || 'http://localhost:11434/v1'}
+                  label="Chat Model"
+                  placeholder="Enter model name (e.g., llama3.2:3b)"
+                  value={ragSettings.MODEL_CHOICE || ''}
                   onChange={e => setRagSettings({
                     ...ragSettings,
-                    LLM_BASE_URL: e.target.value
+                    MODEL_CHOICE: e.target.value
                   })}
-                  placeholder="http://localhost:11434/v1"
                   accentColor="green"
                 />
-              </div>
-            )}
+              ) : (
+                <Select
+                  label="Chat Model" 
+                  value={ragSettings.MODEL_CHOICE || getDefaultChatModel(ragSettings.LLM_PROVIDER || 'openai')} 
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    MODEL_CHOICE: e.target.value
+                  })} 
+                  accentColor="green"
+                  options={getChatModelOptions(ragSettings.LLM_PROVIDER || 'openai')}
+                />
+              )}
+            </div>
+            <div>
+              <Input
+                label="Chat Base URL"
+                value={ragSettings.LLM_BASE_URL || getDefaultChatBaseUrl(ragSettings.LLM_PROVIDER || 'openai')}
+                onChange={e => setRagSettings({
+                  ...ragSettings,
+                  LLM_BASE_URL: e.target.value
+                })}
+                placeholder={getDefaultChatBaseUrl(ragSettings.LLM_PROVIDER || 'openai')}
+                accentColor="green"
+              />
+            </div>
           </div>
         </div>
 
@@ -709,6 +760,8 @@ function getModelPlaceholder(provider: string): string {
       return 'e.g., llama2, mistral';
     case 'google':
       return 'e.g., gemini-1.5-flash';
+    case 'localcloudcode':
+      return 'e.g., sonnet, haiku, opus';
     default:
       return 'e.g., gpt-4o-mini';
   }
@@ -734,6 +787,8 @@ function getDefaultChatModel(provider: string): string {
       return 'llama3.1:8b';
     case 'google':
       return 'gemini-1.5-flash';
+    case 'localcloudcode':
+      return 'sonnet';
     default:
       return 'gpt-4o-mini';
   }
@@ -778,6 +833,22 @@ function getDefaultBaseUrl(provider: string): string {
   switch (provider) {
     case 'ollama':
       return 'http://localhost:11434/v1';
+    case 'localcloudcode':
+      return 'http://localhost:11222';
+    case 'openai':
+    case 'google':
+    default:
+      return '';
+  }
+}
+
+// Helper to get default chat base URLs  
+function getDefaultChatBaseUrl(provider: string): string {
+  switch (provider) {
+    case 'ollama':
+      return 'http://localhost:11434/v1';
+    case 'localcloudcode':
+      return 'http://localhost:11222';
     case 'openai':
     case 'google':
     default:

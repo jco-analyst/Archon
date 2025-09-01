@@ -118,6 +118,14 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
             )
             logger.info("Google Gemini client created successfully")
 
+        elif provider_name == "localcloudcode":
+            # Local cloud code requires minimal setup - uses dummy API key
+            client = openai.AsyncOpenAI(
+                api_key="localcloudcode",  # Required but unused by local service
+                base_url=base_url or "http://localhost:11222",
+            )
+            logger.info(f"Local cloud code client created successfully with base URL: {base_url}")
+
         else:
             raise ValueError(f"Unsupported LLM provider: {provider_name}")
 
