@@ -13,18 +13,26 @@ from typing import Any
 
 try:
     from sentence_transformers import CrossEncoder
-
     CROSSENCODER_AVAILABLE = True
 except ImportError:
     CrossEncoder = None
     CROSSENCODER_AVAILABLE = False
 
+try:
+    from .qwen3_reranker import Qwen3Reranker, create_qwen3_reranker
+    QWEN3_AVAILABLE = True
+except ImportError:
+    Qwen3Reranker = None
+    create_qwen3_reranker = None
+    QWEN3_AVAILABLE = False
+
 from ...config.logfire_config import get_logger, safe_span
 
 logger = get_logger(__name__)
 
-# Default reranking model
-DEFAULT_RERANKING_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# Default reranking models
+DEFAULT_RERANKING_MODEL = "Qwen/Qwen3-Reranker-4B"
+QWEN3_RERANKING_MODEL = "Qwen/Qwen3-Reranker-4B"
 
 
 class RerankingStrategy:
@@ -59,18 +67,61 @@ class RerankingStrategy:
         """
         return cls(model_name=model_name, model_instance=model)
 
-    def _load_model(self) -> CrossEncoder | None:
+    def _load_model(self) -> CrossEncoder | Qwen3Reranker | None:
+        """Load the appropriate reranker model (CrossEncoder or Qwen3Reranker)."""
+        
+        # Check if this is a Qwen3 model
+        if self.model_name.startswith("Qwen/") or "qwen" in self.model_name.lower():
+            return self._load_qwen3_model()
+        else:
+            return self._load_crossencoder_model()
+    
+    def _load_qwen3_model(self) -> Qwen3Reranker | None:
+        """Load the Qwen3 reranker model."""
+        if not QWEN3_AVAILABLE:
+            logger.warning("Qwen3Reranker not available - falling back to CrossEncoder")
+            return self._load_crossencoder_model()
+        
+        try:
+            logger.info(f"Loading Qwen3 reranking model: {self.model_name}")
+            
+            # Get configuration options from environment or defaults
+            use_flash_attention = os.getenv("QWEN3_USE_FLASH_ATTENTION", "false").lower() == "true"
+            max_length = int(os.getenv("QWEN3_MAX_LENGTH", "8192"))
+            torch_dtype = os.getenv("QWEN3_TORCH_DTYPE", None)
+            device = os.getenv("QWEN3_DEVICE", None)
+            
+            # Parse torch dtype if provided
+            dtype = None
+            if torch_dtype:
+                import torch
+                dtype = getattr(torch, torch_dtype, None)
+            
+            return Qwen3Reranker(
+                model_name=self.model_name,
+                max_length=max_length,
+                use_flash_attention=use_flash_attention,
+                torch_dtype=dtype,
+                device=device,
+            )
+        except Exception as e:
+            logger.error(f"Failed to load Qwen3 reranking model {self.model_name}: {e}")
+            logger.info("Falling back to CrossEncoder model")
+            return self._load_crossencoder_model()
+    
+    def _load_crossencoder_model(self) -> CrossEncoder | None:
         """Load the CrossEncoder model for reranking."""
         if not CROSSENCODER_AVAILABLE:
             logger.warning("sentence-transformers not available - reranking disabled")
             return None
 
         try:
-            logger.info(f"Loading reranking model: {self.model_name}")
+            logger.info(f"Loading CrossEncoder reranking model: {self.model_name}")
             return CrossEncoder(self.model_name)
         except Exception as e:
-            logger.error(f"Failed to load reranking model {self.model_name}: {e}")
+            logger.error(f"Failed to load CrossEncoder reranking model {self.model_name}: {e}")
             return None
+
 
     def is_available(self) -> bool:
         """Check if reranking is available (model loaded successfully)."""
@@ -195,16 +246,34 @@ class RerankingStrategy:
 
     def get_model_info(self) -> dict[str, Any]:
         """Get information about the loaded reranking model."""
-        return {
+        base_info = {
             "model_name": self.model_name,
             "available": self.is_available(),
             "crossencoder_available": CROSSENCODER_AVAILABLE,
+            "qwen3_available": QWEN3_AVAILABLE,
             "model_loaded": self.model is not None,
         }
+        
+        # Add model-specific information
+        if isinstance(self.model, Qwen3Reranker):
+            base_info.update({
+                "model_type": "qwen3",
+                "model_info": self.model.get_model_info(),
+            })
+        elif hasattr(self.model, 'max_length'):  # CrossEncoder
+            base_info.update({
+                "model_type": "crossencoder",
+                "max_length": getattr(self.model, 'max_length', None),
+            })
+        else:
+            base_info["model_type"] = "unknown"
+            
+        return base_info
+
 
 
 class RerankingConfig:
-    """Configuration helper for reranking settings"""
+    """Configuration helper for reranking settings with Qwen3 support"""
 
     @staticmethod
     def from_credential_service(credential_service) -> dict[str, Any]:
@@ -213,12 +282,29 @@ class RerankingConfig:
             use_reranking = credential_service.get_bool_setting("USE_RERANKING", False)
             model_name = credential_service.get_setting("RERANKING_MODEL", DEFAULT_RERANKING_MODEL)
             top_k = int(credential_service.get_setting("RERANKING_TOP_K", "0"))
+            
+            # Qwen3-specific settings
+            qwen3_config = {}
+            if model_name.startswith("Qwen/") or "qwen" in model_name.lower():
+                qwen3_config = {
+                    "use_flash_attention": credential_service.get_bool_setting("QWEN3_USE_FLASH_ATTENTION", False),
+                    "max_length": int(credential_service.get_setting("QWEN3_MAX_LENGTH", "8192")),
+                    "torch_dtype": credential_service.get_setting("QWEN3_TORCH_DTYPE", None),
+                    "device": credential_service.get_setting("QWEN3_DEVICE", None),
+                    "instruction": credential_service.get_setting("QWEN3_INSTRUCTION", None),
+                }
 
-            return {
+            config = {
                 "enabled": use_reranking,
                 "model_name": model_name,
                 "top_k": top_k if top_k > 0 else None,
             }
+            
+            if qwen3_config:
+                config["qwen3"] = qwen3_config
+                
+            return config
+            
         except Exception as e:
             logger.error(f"Error loading reranking config: {e}")
             return {"enabled": False, "model_name": DEFAULT_RERANKING_MODEL, "top_k": None}
@@ -226,8 +312,61 @@ class RerankingConfig:
     @staticmethod
     def from_env() -> dict[str, Any]:
         """Load reranking configuration from environment variables."""
-        return {
+        model_name = os.getenv("RERANKING_MODEL", DEFAULT_RERANKING_MODEL)
+        
+        config = {
             "enabled": os.getenv("USE_RERANKING", "false").lower() in ("true", "1", "yes", "on"),
-            "model_name": os.getenv("RERANKING_MODEL", DEFAULT_RERANKING_MODEL),
+            "model_name": model_name,
             "top_k": int(os.getenv("RERANKING_TOP_K", "0")) or None,
         }
+        
+        # Add Qwen3-specific configuration if using Qwen3 model
+        if model_name.startswith("Qwen/") or "qwen" in model_name.lower():
+            config["qwen3"] = {
+                "use_flash_attention": os.getenv("QWEN3_USE_FLASH_ATTENTION", "false").lower() == "true",
+                "max_length": int(os.getenv("QWEN3_MAX_LENGTH", "8192")),
+                "torch_dtype": os.getenv("QWEN3_TORCH_DTYPE", None),
+                "device": os.getenv("QWEN3_DEVICE", None),
+                "instruction": os.getenv("QWEN3_INSTRUCTION", None),
+            }
+            
+        return config
+    
+    @staticmethod
+    def create_reranking_strategy(config: dict[str, Any]) -> "RerankingStrategy":
+        """Create a RerankingStrategy instance from configuration."""
+        if not config.get("enabled", False):
+            return None
+            
+        model_name = config.get("model_name", DEFAULT_RERANKING_MODEL)
+        
+        # Check if this is a Qwen3 model and we have Qwen3-specific config
+        if ("Qwen/" in model_name or "qwen" in model_name.lower()) and config.get("qwen3"):
+            qwen3_config = config["qwen3"]
+            
+            if QWEN3_AVAILABLE:
+                try:
+                    # Parse torch dtype if provided
+                    torch_dtype = qwen3_config.get("torch_dtype")
+                    dtype = None
+                    if torch_dtype:
+                        import torch
+                        dtype = getattr(torch, torch_dtype, None)
+                    
+                    qwen3_model = Qwen3Reranker(
+                        model_name=model_name,
+                        instruction=qwen3_config.get("instruction"),
+                        max_length=qwen3_config.get("max_length", 8192),
+                        use_flash_attention=qwen3_config.get("use_flash_attention", False),
+                        torch_dtype=dtype,
+                        device=qwen3_config.get("device"),
+                    )
+                    
+                    return RerankingStrategy.from_model(qwen3_model, model_name)
+                except Exception as e:
+                    logger.error(f"Failed to create Qwen3 reranker from config: {e}")
+                    # Fall back to standard strategy
+        
+        # Use standard RerankingStrategy
+        return RerankingStrategy(model_name=model_name)
+
