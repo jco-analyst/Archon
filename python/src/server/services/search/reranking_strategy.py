@@ -193,15 +193,17 @@ class RerankingStrategy:
         results: list[dict[str, Any]],
         content_key: str = "content",
         top_k: int | None = None,
+        domain: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Rerank search results using the CrossEncoder model.
+        Rerank search results using the model (CrossEncoder or Qwen3Reranker).
 
         Args:
             query: The search query used to retrieve results
             results: List of search results to rerank
             content_key: The key in each result dict containing text content for reranking
             top_k: Optional limit on number of results to return after reranking
+            domain: Optional domain context for dynamic instruction generation (Qwen3 only)
 
         Returns:
             Reranked list of results ordered by rerank_score (highest first)
@@ -224,8 +226,18 @@ class RerankingStrategy:
                     return results
 
                 # Get reranking scores from the model
-                with safe_span("crossencoder_predict"):
-                    scores = self.model.predict(query_doc_pairs)
+                with safe_span("model_predict"):
+                    # Check if this is a Qwen3 model that supports async predict with domain
+                    if hasattr(self.model, 'predict') and hasattr(self.model, 'enable_dynamic_instructions'):
+                        # Qwen3Reranker with dynamic instruction support
+                        scores = await self.model.predict(query_doc_pairs, domain=domain)
+                    else:
+                        # Standard CrossEncoder or non-async model
+                        if hasattr(self.model, 'predict'):
+                            scores = self.model.predict(query_doc_pairs)
+                        else:
+                            logger.error(f"Model {type(self.model)} does not have predict method")
+                            return results
 
                 # Apply scores and sort results
                 reranked_results = self.apply_rerank_scores(results, scores, valid_indices, top_k)
@@ -243,6 +255,7 @@ class RerankingStrategy:
                 logger.error(f"Error during reranking: {e}")
                 span.set_attribute("error", str(e))
                 return results
+
 
     def get_model_info(self) -> dict[str, Any]:
         """Get information about the loaded reranking model."""

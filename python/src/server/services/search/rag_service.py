@@ -239,8 +239,14 @@ class RAGService:
                 reranking_applied = False
                 if self.reranking_strategy and formatted_results:
                     try:
+                        # Import domain detection function
+                        from .qwen3_reranker import detect_query_domain
+                        
+                        # Auto-detect domain for dynamic instructions
+                        domain = detect_query_domain(query, [r.get("content", "") for r in formatted_results[:5]])
+                        
                         formatted_results = await self.reranking_strategy.rerank_results(
-                            query, formatted_results, content_key="content"
+                            query, formatted_results, content_key="content", domain=domain
                         )
                         reranking_applied = True
                         logger.debug(f"Reranking applied to {len(formatted_results)} results")
@@ -341,8 +347,9 @@ class RAGService:
                 # Apply reranking if we have a strategy
                 if self.reranking_strategy and results:
                     try:
+                        # Code search is inherently 'code' domain for better instructions
                         results = await self.reranking_strategy.rerank_results(
-                            query, results, content_key="content"
+                            query, results, content_key="content", domain="code"
                         )
                     except Exception as e:
                         logger.warning(f"Code reranking failed: {e}")
