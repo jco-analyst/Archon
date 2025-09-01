@@ -9,7 +9,7 @@ Uses the cross-encoder/ms-marco-MiniLM-L-6-v2 model for reranking by default.
 """
 
 import os
-from typing import Any
+from typing import Any, Optional, Union
 
 try:
     from sentence_transformers import CrossEncoder
@@ -39,7 +39,7 @@ class RerankingStrategy:
     """Strategy class implementing result reranking using CrossEncoder models"""
 
     def __init__(
-        self, model_name: str = DEFAULT_RERANKING_MODEL, model_instance: Any | None = None
+        self, model_name: str = DEFAULT_RERANKING_MODEL, model_instance: Optional[Any] = None
     ):
         """
         Initialize reranking strategy.
@@ -67,7 +67,7 @@ class RerankingStrategy:
         """
         return cls(model_name=model_name, model_instance=model)
 
-    def _load_model(self) -> CrossEncoder | Qwen3Reranker | None:
+    def _load_model(self) -> Union[CrossEncoder, Qwen3Reranker, None]:
         """Load the appropriate reranker model (CrossEncoder or Qwen3Reranker)."""
         
         # Check if this is a Qwen3 model
@@ -76,7 +76,7 @@ class RerankingStrategy:
         else:
             return self._load_crossencoder_model()
     
-    def _load_qwen3_model(self) -> Qwen3Reranker | None:
+    def _load_qwen3_model(self) -> Optional[Qwen3Reranker]:
         """Load the Qwen3 reranker model."""
         if not QWEN3_AVAILABLE:
             logger.warning("Qwen3Reranker not available - falling back to CrossEncoder")
@@ -109,7 +109,7 @@ class RerankingStrategy:
             logger.info("Falling back to CrossEncoder model")
             return self._load_crossencoder_model()
     
-    def _load_crossencoder_model(self) -> CrossEncoder | None:
+    def _load_crossencoder_model(self) -> Optional[CrossEncoder]:
         """Load the CrossEncoder model for reranking."""
         if not CROSSENCODER_AVAILABLE:
             logger.warning("sentence-transformers not available - reranking disabled")
@@ -160,7 +160,7 @@ class RerankingStrategy:
         results: list[dict[str, Any]],
         scores: list[float],
         valid_indices: list[int],
-        top_k: int | None = None,
+        top_k: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         """
         Apply reranking scores to results and sort them.
@@ -192,8 +192,8 @@ class RerankingStrategy:
         query: str,
         results: list[dict[str, Any]],
         content_key: str = "content",
-        top_k: int | None = None,
-        domain: str | None = None,
+        top_k: Optional[int] = None,
+        domain: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
         Rerank search results using the model (CrossEncoder or Qwen3Reranker).

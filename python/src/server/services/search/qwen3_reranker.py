@@ -7,6 +7,8 @@ This implementation adapts the Qwen3 reranker to work with Archon's RerankingStr
 
 from typing import Any, Optional
 import torch
+import os
+from datetime import datetime
 
 try:
     from transformers import AutoModel, AutoTokenizer, AutoModelForCausalLM
@@ -107,7 +109,36 @@ class Qwen3Reranker:
             if self.device != "cpu":
                 try:
                     self.model = self.model.to(self.device)
-                except Exception as e
+                except Exception as e:
+                    logger.warning(f"Failed to move model to {self.device}, using CPU: {e}")
+                    self.device = "cpu"
+            
+            # Setup token IDs
+            self.token_false_id = self.tokenizer.convert_tokens_to_ids("no")
+            self.token_true_id = self.tokenizer.convert_tokens_to_ids("yes")
+            
+            # Setup prefix and suffix tokens
+            prefix = ("﻿<|im_start|>system\\nJudge whether the Document meets the requirements "
+                     "based on the Query and the Instruct provided. Note that the answer can "
+                     "only be \\\"yes\\\" or \\\"no\\\".<|im_end|>\\n<|im_start|>user\\n")
+            suffix = "<|im_end|>\\n<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n"
+            
+            self.prefix_tokens = self.tokenizer.encode(prefix, add_special_tokens=False)
+            self.suffix_tokens = self.tokenizer.encode(suffix, add_special_tokens=False)
+            
+            logger.info(f"Qwen3 reranker loaded successfully on {self.device}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load Qwen3 reranker model: {e}")
+            self.model = None
+            self.tokenizer = None
+            return False
+
+    def is_available(self) -> bool:
+        """Check if the model is loaded and available."""
+        return self.model is not None and self.tokenizer is not None
+
 class InstructionHistoryService:
     """Service to track and learn from instruction generation history for better domain detection."""
     
@@ -438,334 +469,3 @@ def detect_query_domain(query: str, document_context: list[str] = None) -> str:
             return 'technical'
     
     return 'general'
-:
-                    logger.warning(f"Failed to move model to {self.device}, using CPU: {e}")
-                    self.device = "cpu"
-            
-            # Setup token IDs
-            self.token_false_id = self.tokenizer.convert_tokens_to_ids("no")
-            self.token_true_id = self.tokenizer.convert_tokens_to_ids("yes")
-            
-            # Setup prefix and suffix tokens
-            prefix = ("﻿<|im_start|>system\\nJudge whether the Document meets the requirements "
-                     "based on the Query and the Instruct provided. Note that the answer can "
-                     "only be \\\"yes\\\" or \\\"no\\\".<|im_end|>\\n<|im_start|>user\\n")
-            suffix = "<|im_end|>\\n<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n"
-            
-            self.prefix_tokens = self.tokenizer.encode(prefix, add_special_tokens=False)
-            self.suffix_tokens = self.tokenizer.encode(suffix, add_special_tokens=False)
-            
-            logger.info(f"Qwen3 reranker loaded successfully on {self.device}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to load Qwen3 reranker model: {e}")
-            self.model = None
-            self.tokenizer = None
-            return False
-
-    def is_available(self) -> bool:
-        """Check if the model is loaded and available."""
-        return self.model is not None and self.tokenizer is not None
-
-    async def get_instruction(self, query: str, domain: Optional[str] = None) -> str:
-        """
-        Get instruction for the query, either static or dynamically generated.
-        
-        Args:
-            query: Search query
-            domain: Optional domain context
-            
-        Returns:
-            Instruction to use for reranking
-        """
-        # Use static instruction if provided
-        if self.static_instruction:
-            return self.static_instruction
-        
-        # Use dynamic instruction generation if enabled
-        if self.enable_dynamic_instructions and self.instruction_generator:
-            try:
-                return await self.instruction_generator.generate_instruction(query, domain)
-            except Exception as e:
-                logger.warning(f"Dynamic instruction generation failed: {e}")
-        
-        # Fallback to default
-        return DEFAULT_INSTRUCTION
-
-    async def format_instruction(self, query: str, document: str, domain: Optional[str] = None) -> str:
-        """
-        Format the instruction, query, and document according to Qwen3 format.
-        
-        Args:
-            query: Search query
-            document: Document to evaluate
-            domain: Optional domain context for dynamic instructions
-            
-        Returns:
-            Formatted instruction string
-        """
-        instruction = await self.get_instruction(query, domain)
-        return f"<Instruct>: {instruction}\\n<Query>: {query}\\n<Document>: {document}"
-
-    def process_inputs(self, pairs: list[str]) -> dict[str, torch.Tensor]:
-        """
-        Process input pairs into tokenized format expected by the model.
-        
-        Args:
-            pairs: List of formatted instruction strings
-            
-        Returns:
-            Tokenized inputs as tensors
-        """
-        # Tokenize without special tokens first
-        inputs = self.tokenizer(
-            pairs,
-            padding=False,
-            truncation='longest_first',
-            return_attention_mask=False,
-            max_length=self.max_length - len(self.prefix_tokens) - len(self.suffix_tokens)
-        )
-        
-        # Add prefix and suffix tokens to each sequence
-        for i, token_ids in enumerate(inputs['input_ids']):
-            inputs['input_ids'][i] = self.prefix_tokens + token_ids + self.suffix_tokens
-        
-        # Pad and convert to tensors
-        inputs = self.tokenizer.pad(
-            inputs,
-            padding=True,
-            return_tensors="pt",
-            max_length=self.max_length
-        )
-        
-        # Move to model device
-        for key in inputs:
-            inputs[key] = inputs[key].to(self.model.device)
-            
-        return inputs
-
-    @torch.no_grad()
-    def compute_logits(self, inputs: dict[str, torch.Tensor]) -> list[float]:
-        """
-        Compute relevance scores from model logits.
-        
-        Args:
-            inputs: Tokenized inputs
-            
-        Returns:
-            List of relevance scores between 0 and 1
-        """
-        # Get model outputs
-        outputs = self.model(**inputs)
-        batch_scores = outputs.logits[:, -1, :]  # Last token logits
-        
-        # Extract yes/no token probabilities
-        true_vector = batch_scores[:, self.token_true_id]
-        false_vector = batch_scores[:, self.token_false_id]
-        
-        # Stack and apply log softmax
-        batch_scores = torch.stack([false_vector, true_vector], dim=1)
-        batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
-        
-        # Get probability of "yes" token
-        scores = batch_scores[:, 1].exp().tolist()
-        
-        return scores
-
-    async def predict(self, query_doc_pairs: list[list[str]], domain: Optional[str] = None) -> list[float]:
-        """
-        Predict relevance scores for query-document pairs with dynamic instructions.
-        
-        Args:
-            query_doc_pairs: List of [query, document] pairs
-            domain: Optional domain context for instruction generation
-            
-        Returns:
-            List of relevance scores (higher = more relevant)
-        """
-        if not self.is_available():
-            logger.warning("Qwen3 reranker not available, returning zero scores")
-            return [0.0] * len(query_doc_pairs)
-        
-        if not query_doc_pairs:
-            return []
-        
-        try:
-            # Format all pairs with dynamic instructions
-            formatted_pairs = []
-            query = query_doc_pairs[0][0] if query_doc_pairs else ""  # Get query from first pair
-            
-            for query_text, document in query_doc_pairs:
-                formatted_pair = await self.format_instruction(query_text, document, domain)
-                formatted_pairs.append(formatted_pair)
-            
-            # Process inputs in batches to handle memory constraints
-            batch_size = min(8, len(formatted_pairs))  # Conservative batch size
-            all_scores = []
-            
-            for i in range(0, len(formatted_pairs), batch_size):
-                batch_pairs = formatted_pairs[i:i + batch_size]
-                
-                # Tokenize and process batch
-                inputs = self.process_inputs(batch_pairs)
-                
-                # Compute scores
-                batch_scores = self.compute_logits(inputs)
-                all_scores.extend(batch_scores)
-                
-                logger.debug(f"Processed batch {i//batch_size + 1}, scores: {batch_scores}")
-            
-            logger.debug(f"Qwen3 reranker processed {len(query_doc_pairs)} pairs, "
-                        f"score range: {min(all_scores):.3f}-{max(all_scores):.3f}")
-            
-            return all_scores
-            
-        except Exception as e:
-            logger.error(f"Error in Qwen3 reranker prediction: {e}")
-            # Return neutral scores on error
-            return [0.5] * len(query_doc_pairs)
-
-    def get_model_info(self) -> dict[str, Any]:
-        """Get information about the loaded model."""
-        return {
-            "model_name": self.model_name,
-            "available": self.is_available(),
-            "device": self.device,
-            "max_length": self.max_length,
-            "use_flash_attention": self.use_flash_attention,
-            "torch_dtype": str(self.torch_dtype) if self.torch_dtype else None,
-            "transformers_available": TRANSFORMERS_AVAILABLE,
-            "dynamic_instructions_enabled": self.enable_dynamic_instructions,
-            "static_instruction": self.static_instruction,
-        }
-
-class InstructionGenerator:
-    """Generates dynamic reranking instructions using the configured LLM."""
-    
-    def __init__(self):
-        self.instruction_cache = {}
-        
-    async def generate_instruction(self, query: str, domain: Optional[str] = None) -> str:
-        """
-        Generate a custom reranking instruction based on the query context.
-        
-        Args:
-            query: The search query
-            domain: Optional domain context (e.g., 'code', 'technical', 'general')
-            
-        Returns:
-            Custom instruction tailored to the query
-        """
-        # Create cache key
-        cache_key = f"{query}_{domain or 'general'}"
-        
-        # Check cache first
-        if cache_key in self.instruction_cache:
-            return self.instruction_cache[cache_key]
-        
-        try:
-            from ..llm_provider_service import get_llm_client
-            
-            # Create instruction generation prompt
-            system_prompt = """You are an expert at creating reranking instructions for search systems. Your task is to analyze a search query and generate a precise, specific instruction that will help a reranker model identify the most relevant documents.
-
-Guidelines:
-- Keep instructions concise (1-2 sentences)
-- Focus on what makes a document relevant to the specific query
-- Consider the query type (factual, technical, code, conceptual, etc.)
-- Be specific about relevance criteria
-- Use action verbs like "rank", "prioritize", "identify", "evaluate"
-
-Examples:
-Query: "React useEffect cleanup function" -> "Rank code examples and documentation by how clearly they explain React useEffect cleanup patterns and implementation details"
-Query: "machine learning overfitting" -> "Prioritize documents that explain overfitting concepts, causes, and practical prevention techniques in machine learning"
-Query: "JWT security best practices" -> "Identify documents that provide comprehensive JWT security guidelines, vulnerability explanations, and implementation recommendations"
-"""
-            
-            user_prompt = f"""Generate a reranking instruction for this search query:
-
-Query: "{query}"
-Domain: {domain or "general"}
-
-Return only the instruction text, no explanations."""
-
-            async with get_llm_client() as client:
-                response = await client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # Use fast model for instruction generation
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.3,  # Lower temperature for consistent instructions
-                    max_tokens=100
-                )
-                
-                instruction = response.choices[0].message.content.strip()
-                
-                # Cache the instruction
-                self.instruction_cache[cache_key] = instruction
-                
-                logger.debug(f"Generated custom instruction for query '{query}': {instruction}")
-                return instruction
-                
-        except Exception as e:
-            logger.warning(f"Failed to generate custom instruction: {e}")
-            # Fallback to domain-based defaults
-            return self._get_fallback_instruction(query, domain)
-    
-    def _get_fallback_instruction(self, query: str, domain: Optional[str] = None) -> str:
-        """Fallback instruction generation based on query patterns and domain."""
-        query_lower = query.lower()
-        
-        # Code-related queries
-        if any(keyword in query_lower for keyword in ['code', 'function', 'class', 'method', 'api', 'syntax', 'implementation']):
-            return "Rank code examples and technical documentation by implementation relevance and code quality"
-        
-        # Technical/how-to queries
-        elif any(keyword in query_lower for keyword in ['how to', 'tutorial', 'guide', 'setup', 'install', 'configure']):
-            return "Prioritize step-by-step guides and tutorials that directly address the specific task or problem"
-        
-        # Conceptual/definition queries
-        elif any(keyword in query_lower for keyword in ['what is', 'define', 'explain', 'concept', 'theory']):
-            return "Identify documents that provide clear explanations and comprehensive coverage of the requested concept"
-        
-        # Problem/troubleshooting queries
-        elif any(keyword in query_lower for keyword in ['error', 'problem', 'issue', 'fix', 'debug', 'troubleshoot']):
-            return "Rank solutions and troubleshooting guides by practical applicability to the specific problem"
-        
-        # Security-related queries
-        elif any(keyword in query_lower for keyword in ['security', 'vulnerability', 'attack', 'authentication', 'authorization']):
-            return "Prioritize security documentation, best practices, and vulnerability analysis relevant to the query"
-        
-        # Default instruction
-        else:
-            return "Rank documents by relevance and comprehensiveness in addressing the search query"
-    
-    def clear_cache(self):
-        """Clear the instruction cache."""
-        self.instruction_cache.clear()
-
-
-
-def create_qwen3_reranker(
-    model_name: str = DEFAULT_QWEN3_MODEL,
-    instruction: Optional[str] = None,
-    **kwargs
-) -> Qwen3Reranker:
-    """
-    Factory function to create a Qwen3Reranker instance.
-    
-    Args:
-        model_name: Model name/path
-        instruction: Task instruction
-        **kwargs: Additional arguments for Qwen3Reranker
-        
-    Returns:
-        Configured Qwen3Reranker instance
-    """
-    return Qwen3Reranker(
-        model_name=model_name,
-        instruction=instruction,
-        **kwargs
-    )
