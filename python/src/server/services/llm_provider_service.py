@@ -173,16 +173,19 @@ async def get_embedding_model(provider: str | None = None) -> str:
             provider_name = provider_config["provider"]
             custom_model = provider_config["embedding_model"]
 
-        # Use custom model if specified
+        # Use custom model if specified, with friendly name mapping
         if custom_model:
+            # Map friendly names to actual model names for Ollama
+            if provider_name == "ollama" and custom_model == "qwen3-embedding-4b:q5_k_m":
+                return "hf.co/Qwen/Qwen3-Embedding-4B-GGUF:Q5_K_M"
             return custom_model
 
         # Return provider-specific defaults
         if provider_name == "openai":
             return "text-embedding-3-small"
         elif provider_name == "ollama":
-            # Ollama default embedding model - now using Qwen3 as preferred
-            return "qwen3-embedding-4b:q5_k_m"
+            # Ollama default embedding model - use actual model ID from Ollama
+            return "hf.co/Qwen/Qwen3-Embedding-4B-GGUF:Q5_K_M"
         elif provider_name == "google":
             # Google's embedding model
             return "text-embedding-004"
