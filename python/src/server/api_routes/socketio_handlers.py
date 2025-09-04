@@ -256,11 +256,104 @@ async def connect(sid, environ):
 
 @sio.event
 async def disconnect(sid):
-    """Handle client disconnection."""
+    """Handle client disconnection with comprehensive cleanup to prevent memory leaks."""
     # Log which rooms the client was in before disconnecting
     rooms = sio.rooms(sid) if hasattr(sio, "rooms") else []
     logger.info(f"🔌 [SOCKETIO] Client disconnected: {sid}, was in rooms: {rooms}")
-    logger.info(f"Client disconnected: {sid}, was in rooms: {rooms}")
+    
+    # MEMORY LEAK FIX: Clean up document locks held by this client
+    expired_locks = []
+    for document_id, lock_info in document_locks.items():
+        if lock_info.get("sid") == sid:
+            expired_locks.append(document_id)
+            logger.info(f"📄 [CLEANUP] Releasing document lock for {document_id} held by disconnected client {sid}")
+    
+    # Remove locks and update document states
+    for document_id in expired_locks:
+        # Update document state
+        if document_id in document_states:
+            state = document_states[document_id]
+            state.is_locked = False
+            state.lock_expiry = None
+            
+        # Remove lock
+        del document_locks[document_id]
+        
+        # Broadcast unlock event to remaining clients
+        if document_id in document_states:
+            project_id = document_states[document_id].project_id
+            room_name = f"doc_{project_id}_{document_id}"
+            
+            try:
+                await sio.emit(
+                    "document_unlocked",
+                    {
+                        "type": "document_unlocked",
+                        "document_id": document_id,
+                        "project_id": project_id,
+                        "user_id": "system",
+                        "timestamp": time.time() * 1000,
+                        "data": {"reason": "client_disconnected"},
+                    },
+                    room=room_name,
+                )
+                logger.info(f"📄 [CLEANUP] Broadcasted unlock for {document_id} after client disconnect")
+            except Exception as e:
+                logger.warning(f"📄 [CLEANUP] Failed to broadcast unlock: {e}")
+    
+    # MEMORY LEAK FIX: Clean up old broadcast times (aggressive cleanup on disconnect)
+    current_time = time.time()
+    cutoff_time = current_time - 60  # Remove entries older than 1 minute
+    old_progress_ids = [pid for pid, t in _last_broadcast_times.items() if t <= cutoff_time]
+    for progress_id in old_progress_ids:
+        del _last_broadcast_times[progress_id]
+    
+    if old_progress_ids:
+        logger.info(f"📂 [CLEANUP] Cleaned up {len(old_progress_ids)} old broadcast time entries on disconnect")
+    
+    # MEMORY LEAK FIX: Clean up stale document states (documents not modified in 1 hour)
+    stale_cutoff = current_time * 1000 - (60 * 60 * 1000)  # 1 hour ago in milliseconds
+    stale_documents = []
+    for document_id, state in document_states.items():
+        # Only clean up unlocked documents that haven't been modified recently
+        if not state.is_locked and state.last_modified < stale_cutoff:
+            # Check if there are any active clients in the document room
+            room_name = f"doc_{state.project_id}_{document_id}"
+            try:
+                # Get room members to see if anyone is still actively using this document
+                room_members = []
+                if hasattr(sio.manager, "rooms"):
+                    room_members = list(sio.manager.rooms.get("/", {}).get(room_name, []))
+                
+                # If no active clients in the room, mark for cleanup
+                if not room_members:
+                    stale_documents.append(document_id)
+            except Exception as e:
+                logger.debug(f"📄 [CLEANUP] Error checking room members for {room_name}: {e}")
+    
+    # Remove stale document states
+    for document_id in stale_documents:
+        del document_states[document_id]
+        logger.info(f"📄 [CLEANUP] Removed stale document state for {document_id} (no active clients)")
+    
+    if stale_documents:
+        logger.info(f"📂 [CLEANUP] Cleaned up {len(stale_documents)} stale document states on disconnect")
+    
+    # MEMORY LEAK FIX: Clean up old chat sessions (aggressive cleanup on disconnect)
+    try:
+        from .agent_chat_api import cleanup_chat_sessions
+        cleaned_sessions = cleanup_chat_sessions(max_age_hours=2)  # Clean sessions older than 2 hours
+        if cleaned_sessions > 0:
+            logger.info(f"💬 [CLEANUP] Cleaned up {cleaned_sessions} old chat sessions on disconnect")
+    except Exception as e:
+        logger.warning(f"💬 [CLEANUP] Failed to clean up chat sessions: {e}")
+    
+    # Log cleanup summary
+    total_cleanup_items = len(expired_locks) + len(old_progress_ids) + len(stale_documents)
+    if total_cleanup_items > 0:
+        logger.info(f"✅ [CLEANUP] Completed disconnect cleanup for {sid}: {len(expired_locks)} locks, {len(old_progress_ids)} broadcast entries, {len(stale_documents)} stale documents")
+    
+    logger.info(f"🔌 [SOCKETIO] Client {sid} disconnect cleanup complete")
 
 
 @sio.event

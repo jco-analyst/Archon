@@ -127,6 +127,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             api_logger.warning(f"Could not set main event loop: {e}")
 
+        # Initialize memory monitoring service (Phase 4 memory leak prevention)
+        try:
+            from .services.memory_monitor import start_memory_monitoring
+            await start_memory_monitoring()
+            api_logger.info("🧠 Memory monitoring service started")
+        except Exception as e:
+            api_logger.warning(f"Could not start memory monitoring: {e}")
+
         # MCP Client functionality removed from architecture
         # Agents now use MCP tools directly
 
@@ -153,12 +161,28 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             api_logger.warning("Could not cleanup crawling context", error=str(e))
 
+        # Cleanup threading service (CRITICAL: prevents ThreadPoolExecutor memory leaks)
+        try:
+            from .services.threading_service import stop_threading_service
+            await stop_threading_service()
+            api_logger.info("Threading service executors shut down")
+        except Exception as e:
+            api_logger.warning("Could not cleanup threading service", error=str(e))
+
         # Cleanup background task manager
         try:
             await cleanup_task_manager()
             api_logger.info("Background task manager cleaned up")
         except Exception as e:
             api_logger.warning("Could not cleanup background task manager", error=str(e))
+
+        # Cleanup memory monitoring service
+        try:
+            from .services.memory_monitor import stop_memory_monitoring
+            await stop_memory_monitoring()
+            api_logger.info("🧠 Memory monitoring service stopped")
+        except Exception as e:
+            api_logger.warning("Could not stop memory monitoring", error=str(e))
 
         api_logger.info("✅ Cleanup completed")
 

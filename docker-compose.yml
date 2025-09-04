@@ -28,9 +28,10 @@ services:
       - app-network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for MCP container control
-      - ./python/src:/app/src  # Mount source code for hot reload
+      # - ./python/src:/app/src  # Mount source code for hot reload (removed - no longer needed without --reload)
       - ./python/tests:/app/tests  # Mount tests for UI test execution
-    command: ["python", "-m", "uvicorn", "src.server.main:socket_app", "--host", "0.0.0.0", "--port", "${ARCHON_SERVER_PORT:-8181}", "--reload"]
+    # Remove --reload to prevent memory leaks from file watcher and multiprocessing worker spawning
+    # command: ["python", "-m", "uvicorn", "src.server.main:socket_app", "--host", "0.0.0.0", "--port", "${ARCHON_SERVER_PORT:-8181}", "--reload"]
     healthcheck:
       test: ["CMD", "sh", "-c", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${ARCHON_SERVER_PORT:-8181}/health')\""]
       interval: 30s

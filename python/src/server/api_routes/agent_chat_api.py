@@ -228,3 +228,66 @@ async def process_agent_response(session_id: str, message: str, context: dict):
     finally:
         # Stop typing indicator
         await sio.emit("typing", {"type": "typing", "is_typing": False}, room=room)
+
+
+# MEMORY LEAK FIX: Session cleanup function
+def cleanup_chat_sessions(max_age_hours: int = 2) -> int:
+    """
+    Clean up chat sessions older than max_age_hours.
+    Returns the number of sessions cleaned up.
+    
+    Args:
+        max_age_hours: Maximum age of sessions to keep (default: 2 hours)
+    
+    Returns:
+        Number of sessions cleaned up
+    """
+    from datetime import datetime, timedelta
+    
+    current_time = datetime.now()
+    cutoff_time = current_time - timedelta(hours=max_age_hours)
+    sessions_to_remove = []
+    
+    for session_id, session_data in sessions.items():
+        try:
+            # Parse the created_at timestamp
+            created_at_str = session_data.get("created_at", "")
+            if created_at_str:
+                # Handle both ISO format and string format
+                if isinstance(created_at_str, str):
+                    # Try parsing ISO format first
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                        # Remove timezone info for comparison
+                        created_at = created_at.replace(tzinfo=None)
+                    except ValueError:
+                        # Fallback to assuming it's already a datetime string
+                        logger.warning(f"Could not parse created_at for session {session_id}: {created_at_str}")
+                        continue
+                else:
+                    created_at = created_at_str
+                
+                # Check if session is too old
+                if created_at < cutoff_time:
+                    sessions_to_remove.append(session_id)
+                    logger.debug(f"📂 [SESSION CLEANUP] Marking session {session_id} for cleanup (created: {created_at}, cutoff: {cutoff_time})")
+        except Exception as e:
+            logger.warning(f"📂 [SESSION CLEANUP] Error checking session {session_id} age: {e}")
+            # If we can't determine age, err on the side of caution and don't remove
+            continue
+    
+    # Remove the old sessions
+    cleaned_count = 0
+    for session_id in sessions_to_remove:
+        try:
+            del sessions[session_id]
+            cleaned_count += 1
+            logger.debug(f"📂 [SESSION CLEANUP] Removed old chat session: {session_id}")
+        except KeyError:
+            # Session already removed somehow
+            continue
+    
+    if cleaned_count > 0:
+        logger.info(f"📂 [SESSION CLEANUP] Cleaned up {cleaned_count} old chat sessions (older than {max_age_hours}h)")
+    
+    return cleaned_count

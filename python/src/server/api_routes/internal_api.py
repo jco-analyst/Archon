@@ -138,3 +138,109 @@ async def get_mcp_credentials(request: Request) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Error retrieving MCP credentials: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve credentials")
+
+
+# Memory monitoring endpoints (Phase 4 memory leak prevention)
+@router.get("/memory/status")
+async def get_memory_status(request: Request) -> dict[str, Any]:
+    """
+    Get current memory usage status and metrics.
+    
+    This endpoint provides comprehensive memory monitoring data including
+    process memory usage, system metrics, and Archon-specific object counts.
+    """
+    # Check if request is from internal source
+    if not is_internal_request(request):
+        logger.warning(f"Unauthorized access to memory status from {request.client.host}")
+        raise HTTPException(status_code=403, detail="Access forbidden")
+
+    try:
+        from ..services.memory_monitor import get_memory_monitor
+        
+        monitor = get_memory_monitor()
+        report = monitor.get_memory_report()
+        
+        logger.info(f"Provided memory status to {request.client.host}")
+        return report
+
+    except Exception as e:
+        logger.error(f"Error retrieving memory status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve memory status")
+
+
+@router.get("/memory/metrics")
+async def get_current_memory_metrics(request: Request) -> dict[str, Any]:
+    """
+    Get current memory metrics snapshot.
+    
+    Provides real-time memory usage data for monitoring and alerting.
+    """
+    # Check if request is from internal source  
+    if not is_internal_request(request):
+        logger.warning(f"Unauthorized access to memory metrics from {request.client.host}")
+        raise HTTPException(status_code=403, detail="Access forbidden")
+
+    try:
+        from ..services.memory_monitor import get_memory_monitor
+        
+        monitor = get_memory_monitor()
+        current_metrics = monitor.get_current_metrics()
+        
+        # Convert to dict for JSON serialization
+        metrics_dict = {
+            "timestamp": current_metrics.timestamp.isoformat(),
+            "process_memory_mb": current_metrics.process_memory_mb,
+            "system_memory_percent": current_metrics.system_memory_percent,
+            "virtual_memory_mb": current_metrics.virtual_memory_mb,
+            "rss_memory_mb": current_metrics.rss_memory_mb,
+            "heap_objects": current_metrics.heap_objects,
+            "gc_collections": current_metrics.gc_collections,
+            "custom_metrics": current_metrics.custom_metrics
+        }
+        
+        logger.debug(f"Provided memory metrics to {request.client.host}")
+        return metrics_dict
+
+    except Exception as e:
+        logger.error(f"Error retrieving memory metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve memory metrics")
+
+
+@router.post("/memory/cleanup")
+async def trigger_memory_cleanup(request: Request) -> dict[str, Any]:
+    """
+    Trigger manual memory cleanup operations.
+    
+    Forces cleanup of chat sessions, garbage collection, and other
+    memory leak prevention operations.
+    """
+    # Check if request is from internal source
+    if not is_internal_request(request):
+        logger.warning(f"Unauthorized access to memory cleanup from {request.client.host}")
+        raise HTTPException(status_code=403, detail="Access forbidden")
+
+    try:
+        from ..services.memory_monitor import get_memory_monitor
+        
+        monitor = get_memory_monitor()
+        
+        # Trigger the periodic cleanup manually
+        await monitor._run_periodic_cleanup()
+        
+        # Get updated metrics after cleanup
+        updated_metrics = monitor.get_current_metrics()
+        
+        result = {
+            "status": "cleanup_completed",
+            "timestamp": updated_metrics.timestamp.isoformat(),
+            "memory_after_cleanup_mb": updated_metrics.process_memory_mb,
+            "objects_after_cleanup": updated_metrics.heap_objects,
+            "custom_metrics": updated_metrics.custom_metrics
+        }
+        
+        logger.info(f"Manual memory cleanup completed for request from {request.client.host}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error during memory cleanup: {e}")
+        raise HTTPException(status_code=500, detail="Failed to perform memory cleanup")
