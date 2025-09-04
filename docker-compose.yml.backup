@@ -11,8 +11,6 @@ services:
     restart: unless-stopped
     ports:
       - "${ARCHON_SERVER_PORT:-8181}:${ARCHON_SERVER_PORT:-8181}"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
@@ -23,7 +21,6 @@ services:
       - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
       - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
-      - LLM_BASE_URL=http://host.docker.internal:11434/v1
     networks:
       - app-network
     volumes:

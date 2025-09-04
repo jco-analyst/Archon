@@ -19,6 +19,8 @@ export interface RagSettings {
   MODEL_CHOICE: string;
   LLM_PROVIDER?: string;
   LLM_BASE_URL?: string;
+  EMBEDDING_PROVIDER?: string;
+  EMBEDDING_BASE_URL?: string;
   EMBEDDING_MODEL?: string;
   // Crawling Performance Settings
   CRAWL_BATCH_SIZE?: number;
@@ -127,6 +129,8 @@ class CredentialsService {
       MODEL_CHOICE: 'gpt-4.1-nano',
       LLM_PROVIDER: 'openai',
       LLM_BASE_URL: '',
+      EMBEDDING_PROVIDER: 'openai',
+      EMBEDDING_BASE_URL: '',
       EMBEDDING_MODEL: '',
       // Crawling Performance Settings defaults
       CRAWL_BATCH_SIZE: 50,
@@ -150,7 +154,7 @@ class CredentialsService {
     [...ragCredentials, ...apiKeysCredentials].forEach(cred => {
       if (cred.key in settings) {
         // String fields
-        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_MODEL', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
+        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
           (settings as any)[cred.key] = cred.value || '';
         } 
         // Number fields
