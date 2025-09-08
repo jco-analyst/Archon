@@ -100,6 +100,30 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
             client = openai.AsyncOpenAI(api_key=api_key)
             logger.info("OpenAI client created successfully")
 
+        elif provider_name == "openai_free":
+            if not api_key:
+                raise ValueError("OpenAI API key not found")
+
+            # Get fallback provider from settings
+            fallback_provider = rag_settings.get("OPENAI_FREE_FALLBACK_PROVIDER") if 'rag_settings' in locals() else None
+            if not fallback_provider:
+                # Try to get from cache or database
+                cache_key = "rag_strategy_settings"
+                rag_settings = _get_cached_settings(cache_key)
+                if rag_settings is None:
+                    rag_settings = await credential_service.get_credentials_by_category("rag_strategy")
+                    _set_cached_settings(cache_key, rag_settings)
+                fallback_provider = rag_settings.get("OPENAI_FREE_FALLBACK_PROVIDER")
+            
+            # Import the wrapper here to avoid circular imports
+            from .openai_free_wrapper import get_openai_free_client
+            
+            # Use the specialized OpenAI Free wrapper with token tracking
+            async with get_openai_free_client(fallback_provider=fallback_provider) as wrapper_client:
+                logger.info("OpenAI Free client created successfully with token tracking enabled")
+                yield wrapper_client
+                return  # Early return to avoid the general yield below
+
         elif provider_name == "ollama":
             # Ollama requires an API key in the client but doesn't actually use it
             client = openai.AsyncOpenAI(
@@ -139,6 +163,8 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
     finally:
         # Cleanup if needed
         pass
+
+
 
 
 async def get_embedding_model(provider: str | None = None) -> str:

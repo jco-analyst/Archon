@@ -460,6 +460,7 @@ class CredentialService:
         """Get API key for a specific provider."""
         key_mapping = {
             "openai": "OPENAI_API_KEY",
+            "openai_free": "OPENAI_API_KEY",  # OpenAI Free uses same API key as regular OpenAI
             "google": "GOOGLE_API_KEY",
             "ollama": None,  # No API key needed
         }
@@ -469,13 +470,17 @@ class CredentialService:
             return await self.get_credential(key_name)
         return "ollama" if provider == "ollama" else None
 
+
     def _get_provider_base_url(self, provider: str, rag_settings: dict) -> str | None:
         """Get base URL for provider."""
         if provider == "ollama":
             return rag_settings.get("LLM_BASE_URL", "http://localhost:11434/v1")
         elif provider == "google":
             return "https://generativelanguage.googleapis.com/v1beta/openai/"
+        elif provider == "openai_free":
+            return "https://api.openai.com/v1"  # Same as OpenAI standard
         return None  # Use default for OpenAI
+  # Use default for OpenAI
 
     async def set_active_provider(self, provider: str, service_type: str = "llm") -> bool:
         """Set the active provider for a service type."""

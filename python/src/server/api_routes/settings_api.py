@@ -35,6 +35,21 @@ class CredentialUpdateRequest(BaseModel):
     category: str | None = None
     description: str | None = None
 
+# OpenAI Free Provider Configuration Models
+class OpenAIFreeConfigRequest(BaseModel):
+    fallback_provider: str | None = None
+    enable_token_tracking: bool = True
+
+
+class OpenAIFreeUsageResponse(BaseModel):
+    provider_name: str
+    usage_date: str
+    models: dict[str, Any]
+    total_tokens_used: int
+    total_token_limit: int
+    total_remaining: int
+
+
 
 class CredentialResponse(BaseModel):
     success: bool
@@ -314,7 +329,142 @@ async def database_metrics():
             settings_response.count if settings_response.count is not None else 0
         )
 
-        total_records = sum(tables_info.values())
+        total_records
+# OpenAI Free Provider Endpoints
+@router.post("/openai-free/config")
+async def configure_openai_free(request: OpenAIFreeConfigRequest):
+    """Configure OpenAI Free provider settings including fallback provider."""
+    try:
+        logfire.info(f"Configuring OpenAI Free provider | fallback={request.fallback_provider}")
+        
+        # Store fallback provider setting
+        if request.fallback_provider:
+            success = await credential_service.set_credential(
+                key="OPENAI_FREE_FALLBACK_PROVIDER",
+                value=request.fallback_provider,
+                is_encrypted=False,
+                category="rag_strategy",
+                description="Fallback provider when OpenAI Free token limits are exceeded"
+            )
+            
+            if not success:
+                raise HTTPException(status_code=500, detail={"error": "Failed to save fallback provider setting"})
+        
+        # Store token tracking setting
+        success = await credential_service.set_credential(
+            key="OPENAI_FREE_TOKEN_TRACKING_ENABLED",
+            value=str(request.enable_token_tracking).lower(),
+            is_encrypted=False,
+            category="rag_strategy",
+            description="Enable token tracking for OpenAI Free provider"
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail={"error": "Failed to save token tracking setting"})
+        
+        logfire.info(f"OpenAI Free provider configured successfully | fallback={request.fallback_provider}")
+        
+        return {
+            "success": True,
+            "message": "OpenAI Free provider configured successfully",
+            "fallback_provider": request.fallback_provider,
+            "token_tracking_enabled": request.enable_token_tracking
+        }
+        
+    except Exception as e:
+        logfire.error(f"Error configuring OpenAI Free provider | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.get("/openai-free/usage", response_model=OpenAIFreeUsageResponse)
+async def get_openai_free_usage():
+    """Get current token usage statistics for OpenAI Free provider."""
+    try:
+        logfire.info("Getting OpenAI Free usage statistics")
+        
+        # Import here to avoid circular imports
+        from ..services.token_tracking_service import token_tracking_service
+        
+        usage_summary = await token_tracking_service.get_provider_usage_summary("openai_free")
+        
+        if usage_summary.get("error"):
+            logfire.error(f"Error getting usage summary | error={usage_summary['error']}")
+            raise HTTPException(status_code=500, detail={"error": usage_summary["error"]})
+        
+        logfire.info(f"Usage statistics retrieved | total_used={usage_summary.get('total_tokens_used', 0)}")
+        
+        return OpenAIFreeUsageResponse(
+            provider_name=usage_summary["provider_name"],
+            usage_date=usage_summary["usage_date"],
+            models=usage_summary["models"],
+            total_tokens_used=usage_summary["total_tokens_used"],
+            total_token_limit=usage_summary["total_token_limit"],
+            total_remaining=usage_summary["total_remaining"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Error getting OpenAI Free usage | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.get("/openai-free/config")
+async def get_openai_free_config():
+    """Get current OpenAI Free provider configuration."""
+    try:
+        logfire.info("Getting OpenAI Free provider configuration")
+        
+        # Get fallback provider
+        fallback_provider = await credential_service.get_credential("OPENAI_FREE_FALLBACK_PROVIDER")
+        
+        # Get token tracking setting
+        token_tracking_enabled = await credential_service.get_credential("OPENAI_FREE_TOKEN_TRACKING_ENABLED", "true")
+        
+        config = {
+            "fallback_provider": fallback_provider,
+            "enable_token_tracking": str(token_tracking_enabled).lower() == "true",
+            "available_fallback_providers": ["openai", "google", "ollama", "localcloudcode"]
+        }
+        
+        logfire.info(f"Configuration retrieved | fallback={fallback_provider}")
+        
+        return config
+        
+    except Exception as e:
+        logfire.error(f"Error getting OpenAI Free configuration | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.delete("/openai-free/usage/cleanup")
+async def cleanup_old_usage_records(days_to_keep: int = 30):
+    """Clean up old token usage records."""
+    try:
+        logfire.info(f"Cleaning up token usage records older than {days_to_keep} days")
+        
+        # Import here to avoid circular imports  
+        from ..services.token_tracking_service import token_tracking_service
+        
+        cleanup_result = await token_tracking_service.cleanup_old_usage_records(days_to_keep)
+        
+        if not cleanup_result.get("success"):
+            raise HTTPException(status_code=500, detail={"error": cleanup_result.get("error", "Cleanup failed")})
+        
+        logfire.info(f"Cleanup completed | deleted_count={cleanup_result['deleted_count']}")
+        
+        return {
+            "success": True,
+            "message": f"Cleaned up {cleanup_result['deleted_count']} old usage records",
+            "deleted_count": cleanup_result["deleted_count"],
+            "cutoff_date": cleanup_result["cutoff_date"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Error cleaning up usage records | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+ = sum(tables_info.values())
         logfire.info(
             f"Database metrics retrieved | total_records={total_records} | tables={tables_info}"
         )

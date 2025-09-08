@@ -22,6 +22,26 @@ function getChatModelOptions(provider: string): Array<{value: string, label: str
         { value: 'gpt-4.1-mini-2025-04-14', label: 'GPT-4.1 Mini (Tier 2)' },
         { value: 'gpt-4.1-nano-2025-04-14', label: 'GPT-4.1 Nano (Tier 2)' },
       ];
+    case 'openai_free':
+      return [
+        // Premium models - 250,000 tokens/day
+        { value: 'gpt-5', label: 'GPT-5 (250k/day)' },
+        { value: 'gpt-5-chat-latest', label: 'GPT-5 Chat Latest (250k/day)' },
+        { value: 'gpt-4.1', label: 'GPT-4.1 (250k/day)' },
+        { value: 'gpt-4o', label: 'GPT-4o (250k/day)' },
+        { value: 'o1', label: 'o1 (250k/day)' },
+        { value: 'o3', label: 'o3 (250k/day)' },
+        // Mini models - 2,500,000 tokens/day
+        { value: 'gpt-5-mini', label: 'GPT-5 Mini (2.5M/day)' },
+        { value: 'gpt-5-nano', label: 'GPT-5 Nano (2.5M/day)' },
+        { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (2.5M/day)' },
+        { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (2.5M/day)' },
+        { value: 'gpt-4o-mini', label: 'GPT-4o Mini (2.5M/day)' },
+        { value: 'o1-mini', label: 'o1 Mini (2.5M/day)' },
+        { value: 'o3-mini', label: 'o3 Mini (2.5M/day)' },
+        { value: 'o4-mini', label: 'o4 Mini (2.5M/day)' },
+        { value: 'codex-mini-latest', label: 'Codex Mini Latest (2.5M/day)' },
+      ];
     case 'google':
       return [
         { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
@@ -58,6 +78,7 @@ interface RAGSettingsProps {
     LLM_BASE_URL?: string;
     EMBEDDING_PROVIDER?: string;
     EMBEDDING_BASE_URL?: string;
+    FALLBACK_PROVIDER?: string;
     // Qwen3 Reranking Settings
     QWEN3_TORCH_DTYPE?: string;
     QWEN3_DEVICE?: string;
@@ -157,6 +178,7 @@ export const RAGSettings = ({
                 accentColor="green"
                 options={[
                   { value: 'openai', label: 'OpenAI' },
+                  { value: 'openai_free', label: 'OpenAI Free' },
                   { value: 'google', label: 'Google Gemini' },
                   { value: 'ollama', label: 'Ollama' },
                   { value: 'localcloudcode', label: 'Claude Code' },
@@ -201,6 +223,36 @@ export const RAGSettings = ({
               />
             </div>
           </div>
+          
+          {/* Fallback Provider Selection - Only show when OpenAI Free is selected */}
+          {ragSettings.LLM_PROVIDER === 'openai_free' && (
+            <div className="mt-4 p-3 rounded-lg border border-yellow-500/20 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Select
+                    label="Fallback Provider"
+                    value={ragSettings.FALLBACK_PROVIDER || 'openai'}
+                    onChange={e => setRagSettings({
+                      ...ragSettings,
+                      FALLBACK_PROVIDER: e.target.value
+                    })}
+                    accentColor="yellow"
+                    options={[
+                      { value: 'openai', label: 'OpenAI (Paid)' },
+                      { value: 'google', label: 'Google Gemini' },
+                      { value: 'ollama', label: 'Ollama' },
+                      { value: 'localcloudcode', label: 'Claude Code' },
+                    ]}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 pb-2">
+                    When daily token limits are exceeded, requests will automatically use this provider instead.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Embedding Provider Section */}
@@ -783,6 +835,8 @@ function getDefaultChatModel(provider: string): string {
   switch (provider) {
     case 'openai':
       return 'gpt-4o-mini';
+    case 'openai_free':
+      return 'gpt-4o-mini';
     case 'ollama':
       return 'llama3.1:8b';
     case 'google':
@@ -836,6 +890,7 @@ function getDefaultBaseUrl(provider: string): string {
     case 'localcloudcode':
       return 'http://localhost:11222';
     case 'openai':
+    case 'openai_free':
     case 'google':
     default:
       return '';
@@ -850,6 +905,7 @@ function getDefaultChatBaseUrl(provider: string): string {
     case 'localcloudcode':
       return 'http://localhost:11222';
     case 'openai':
+    case 'openai_free':
     case 'google':
     default:
       return '';
