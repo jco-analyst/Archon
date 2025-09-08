@@ -22,6 +22,7 @@ export interface RagSettings {
   EMBEDDING_PROVIDER?: string;
   EMBEDDING_BASE_URL?: string;
   EMBEDDING_MODEL?: string;
+  FALLBACK_PROVIDER?: string;
   // Crawling Performance Settings
   CRAWL_BATCH_SIZE?: number;
   CRAWL_MAX_CONCURRENT?: number;
@@ -132,6 +133,7 @@ class CredentialsService {
       EMBEDDING_PROVIDER: 'openai',
       EMBEDDING_BASE_URL: '',
       EMBEDDING_MODEL: '',
+      FALLBACK_PROVIDER: 'openai',
       // Crawling Performance Settings defaults
       CRAWL_BATCH_SIZE: 50,
       CRAWL_MAX_CONCURRENT: 10,
@@ -154,7 +156,7 @@ class CredentialsService {
     [...ragCredentials, ...apiKeysCredentials].forEach(cred => {
       if (cred.key in settings) {
         // String fields
-        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
+        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'FALLBACK_PROVIDER', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
           (settings as any)[cred.key] = cred.value || '';
         } 
         // Number fields
