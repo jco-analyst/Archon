@@ -329,7 +329,21 @@ async def database_metrics():
             settings_response.count if settings_response.count is not None else 0
         )
 
-        total_records
+        # Calculate total records
+        total_records = sum(tables_info.values())
+        
+        return {
+            "success": True,
+            "database_metrics": {
+                "tables": tables_info,
+                "total_records": total_records
+            }
+        }
+    except Exception as e:
+        logfire.error(f"Error getting database metrics | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
 # OpenAI Free Provider Endpoints
 @router.post("/openai-free/config")
 async def configure_openai_free(request: OpenAIFreeConfigRequest):
@@ -464,18 +478,6 @@ async def cleanup_old_usage_records(days_to_keep: int = 30):
     except Exception as e:
         logfire.error(f"Error cleaning up usage records | error={str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
- = sum(tables_info.values())
-        logfire.info(
-            f"Database metrics retrieved | total_records={total_records} | tables={tables_info}"
-        )
-
-        return {
-            "status": "healthy",
-            "database": "supabase",
-            "tables": tables_info,
-            "total_records": total_records,
-            "timestamp": datetime.now().isoformat(),
-        }
 
     except Exception as e:
         logfire.error(f"Error getting database metrics | error={str(e)}")
