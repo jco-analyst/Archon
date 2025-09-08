@@ -172,6 +172,13 @@ uv run pytest tests/test_service_integration.py -v
 - `GET /api/projects/{id}/tasks` - Get project tasks
 - `POST /api/projects/{id}/tasks` - Create task
 
+### OpenAI Free Provider
+
+- `POST /api/openai-free/config` - Configure fallback provider for OpenAI Free
+- `GET /api/openai-free/config` - Get current OpenAI Free configuration  
+- `GET /api/openai-free/usage` - View current token usage statistics
+- `DELETE /api/openai-free/usage/cleanup` - Clean up old usage records
+
 ## Socket.IO Events
 
 Real-time updates via Socket.IO on port 8181:
@@ -196,6 +203,51 @@ Optional:
 OPENAI_API_KEY=your-openai-key        # Can be set via UI
 LOGFIRE_TOKEN=your-logfire-token      # For observability
 LOG_LEVEL=INFO                         # DEBUG, INFO, WARNING, ERROR
+```
+
+## OpenAI Free Provider Configuration
+
+The OpenAI Free provider offers access to OpenAI models with daily token limits and automatic fallback functionality.
+
+### Configuration Requirements
+
+**Base URL**: The system automatically configures the base URL as `https://api.openai.com/v1` when OpenAI Free is selected as the LLM provider. If the base URL field appears empty in the UI, it should be set to this value.
+
+**Required Settings**:
+- **LLM Provider**: `openai_free`
+- **LLM Base URL**: `https://api.openai.com/v1`
+- **Model Choice**: Any OpenAI Free compatible model
+- **Fallback Provider**: Configure an alternate provider for when limits are exceeded
+
+### Token Limits
+
+**Premium Models (250,000 tokens/day)**:
+- gpt-5, gpt-5-chat-latest, gpt-4.1, gpt-4o, o1, o3
+
+**Mini Models (2,500,000 tokens/day)**:
+- gpt-5-mini, gpt-5-nano, gpt-4.1-mini, gpt-4.1-nano, gpt-4o-mini, o1-mini, o3-mini, o4-mini, codex-mini-latest
+
+### Database Schema
+
+Token usage is tracked in the `archon_token_usage` table:
+```sql
+CREATE TABLE archon_token_usage (
+    provider_name VARCHAR(50) CHECK (provider_name IN ('openai_free')),
+    model_name VARCHAR(100) NOT NULL,
+    usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    token_limit INTEGER NOT NULL,
+    UNIQUE(provider_name, model_name, usage_date)
+);
+```
+
+### Troubleshooting
+
+**Empty Base URL**: If the LLM Base URL field is empty, manually set it to `https://api.openai.com/v1` via the Settings UI or API:
+```bash
+curl -X PUT http://localhost:8181/api/credentials/LLM_BASE_URL \
+  -H "Content-Type: application/json" \
+  -d '{"value": "https://api.openai.com/v1", "is_encrypted": false, "category": "rag_strategy"}'
 ```
 
 ## File Organization

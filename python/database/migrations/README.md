@@ -96,6 +96,22 @@ The table tracks daily usage for OpenAI Free models:
 **Mini Models (2,500,000 tokens/day):**
 - gpt-5-mini, gpt-5-nano, gpt-4.1-mini, gpt-4.1-nano, gpt-4o-mini, o1-mini, o3-mini, o4-mini, codex-mini-latest
 
+### Configuration After Migration
+
+After successfully running the token usage migration, ensure the OpenAI Free provider is properly configured:
+
+```bash
+# Set the correct base URL for OpenAI Free provider
+curl -X PUT http://localhost:8181/api/credentials/LLM_BASE_URL \
+  -H "Content-Type: application/json" \
+  -d '{"value": "https://api.openai.com/v1", "is_encrypted": false, "category": "rag_strategy"}'
+
+# Verify configuration
+curl -s http://localhost:8181/api/credentials/categories/rag_strategy | jq '.credentials.LLM_BASE_URL'
+```
+
+**Note**: The base URL may appear empty in the UI even though the provider logic automatically uses `https://api.openai.com/v1`. Setting it explicitly ensures consistent behavior across all components.
+
 ### Troubleshooting
 
 #### Connection Issues
