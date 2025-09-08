@@ -1,9 +1,3 @@
----
-title: OpenAI Free Provider Token Tracking Fix
-sidebar_position: 50
-tags: [troubleshooting, openai-free, token-tracking, database, incident-report]
----
-
 # Archon OpenAI Free Provider Token Tracking Fix
 
 **Date**: September 8, 2025  
