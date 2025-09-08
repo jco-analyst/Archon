@@ -1,0 +1,333 @@
+---
+title: OpenAI Free Provider Token Tracking Fix
+sidebar_position: 50
+tags: [troubleshooting, openai-free, token-tracking, database, incident-report]
+---
+
+# Archon OpenAI Free Provider Token Tracking Fix
+
+**Date**: September 8, 2025  
+**Issue**: Archon falling back to 4-0 model instead of using configured gpt-5-mini  
+**Status**: ✅ RESOLVED  
+**Impact**: Critical - Affects all OpenAI Free provider usage  
+
+## Executive Summary
+
+The Archon knowledge management system was incorrectly falling back from the OpenAI Free provider (gpt-5-mini model) to the configured fallback provider (llama3.1:8b) due to a missing database table required for token usage tracking. The issue was resolved by creating the missing `archon_token_usage` table with proper schema and indexes.
+
+## Issue Description
+
+### Symptoms
+- Users reported that Archon was using "4-0 model" instead of the configured "Chatchibouti 5 mini" (gpt-5-mini)
+- System was falling back to ollama provider with llama3.1:8b model
+- OpenAI Free provider appeared to be non-functional despite correct configuration
+
+### Root Cause Analysis
+The OpenAI Free provider requires token usage tracking to enforce daily limits:
+- **Premium models**: 250,000 tokens/day (gpt-5, gpt-4.1, gpt-4o, etc.)
+- **Mini models**: 2,500,000 tokens/day (gpt-5-mini, gpt-4o-mini, etc.)
+
+When the system tried to check token usage, it failed because the `archon_token_usage` table did not exist in the database. This caused the OpenAI Free wrapper to treat the provider as unavailable, triggering the automatic fallback mechanism.
+
+### Error Evidence
+```
+Error getting provider usage summary: {'message': 'relation "public.archon_token_usage" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+```
+
+## Architecture Overview
+
+### OpenAI Free Provider Architecture
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   User Request  │───▶│  OpenAI Free     │───▶│  Token Tracking │
+│                 │    │  Wrapper Service │    │  Service        │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │  Fallback Logic  │    │ archon_token_   │
+                       │  (if limits hit) │    │ usage table     │
+                       └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │ Ollama Provider  │
+                       │ (llama3.1:8b)    │
+                       └──────────────────┘
+```
+
+### Token Tracking Flow
+1. **Request Initiated**: User makes API call requiring LLM
+2. **Token Estimation**: System estimates token usage for request
+3. **Limit Check**: Query `archon_token_usage` table for current daily usage
+4. **Decision Logic**:
+   - If under limit: Use OpenAI Free provider
+   - If over limit: Switch to fallback provider
+   - If table missing: **Treat as failure, use fallback**
+5. **Usage Tracking**: After successful request, record actual token usage
+
+## Database Schema
+
+### archon_token_usage Table Structure
+```sql
+CREATE TABLE archon_token_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider_name VARCHAR(50) NOT NULL,
+    model_name VARCHAR(100) NOT NULL,
+    usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    token_limit INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    UNIQUE(provider_name, model_name, usage_date)
+);
+```
+
+### Indexes for Performance
+```sql
+CREATE INDEX idx_token_usage_provider_date 
+    ON archon_token_usage(provider_name, usage_date);
+    
+CREATE INDEX idx_token_usage_model_date 
+    ON archon_token_usage(provider_name, model_name, usage_date);
+```
+
+## Configuration Details
+
+### Current System Configuration
+- **LLM Provider**: `openai_free`
+- **Model Choice**: `gpt-5-mini` (2.5M tokens/day limit)
+- **LLM Base URL**: `https://api.openai.com/v1`
+- **Fallback Provider**: `ollama`
+- **Fallback Model**: `llama3.1:8b`
+- **Fallback Base URL**: `http://localhost:11434/v1`
+
+### Token Limits by Model Tier
+```
+Premium Models (250,000 tokens/day):
+├── gpt-5
+├── gpt-5-chat-latest
+├── gpt-4.1
+├── gpt-4o
+├── o1
+└── o3
+
+Mini Models (2,500,000 tokens/day):
+├── gpt-5-mini
+├── gpt-5-nano
+├── gpt-4.1-mini
+├── gpt-4.1-nano
+├── gpt-4o-mini
+├── o1-mini
+├── o3-mini
+├── o4-mini
+└── codex-mini-latest
+```
+
+## Resolution Steps
+
+### Step 1: Diagnosis
+1. **Health Check**: Verified Archon MCP server status
+2. **Configuration Audit**: Examined provider settings and API keys
+3. **Log Analysis**: Identified database table missing error
+4. **Token API Testing**: Confirmed API endpoint failure
+
+### Step 2: Database Fix
+1. **Connected to PostgreSQL**: Direct access to `supabase-db` container
+2. **Created Table**: Executed schema creation SQL
+3. **Added Indexes**: Performance optimization indexes
+4. **Verified Structure**: Confirmed table creation success
+
+### Step 3: System Restart
+1. **Restarted Service**: `docker compose restart archon-server`
+2. **Health Verification**: Confirmed all services healthy
+3. **API Testing**: Validated token tracking endpoint functionality
+
+### Step 4: Validation
+1. **Token Usage API**: Confirmed returning proper limits and current usage
+2. **UI Testing**: Verified settings page loads correctly
+3. **Configuration Check**: Ensured OpenAI Free provider operational
+
+## Resolution Commands
+
+### Database Table Creation
+```bash
+docker exec supabase-db psql -U postgres -c "
+CREATE TABLE IF NOT EXISTS archon_token_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider_name VARCHAR(50) NOT NULL,
+    model_name VARCHAR(100) NOT NULL,
+    usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    token_limit INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    UNIQUE(provider_name, model_name, usage_date)
+);"
+```
+
+### Index Creation
+```bash
+docker exec supabase-db psql -U postgres -c "
+CREATE INDEX IF NOT EXISTS idx_token_usage_provider_date 
+    ON archon_token_usage(provider_name, usage_date);
+CREATE INDEX IF NOT EXISTS idx_token_usage_model_date 
+    ON archon_token_usage(provider_name, model_name, usage_date);"
+```
+
+### Service Restart
+```bash
+docker compose restart archon-server
+```
+
+## Testing and Validation
+
+### Token Usage API Response (Post-Fix)
+```json
+{
+  "provider_name": "openai_free",
+  "usage_date": "2025-09-08",
+  "models": {
+    "gpt-5-mini": {
+      "tokens_used": 0,
+      "token_limit": 2500000,
+      "remaining_tokens": 2500000,
+      "limit_exceeded": false
+    }
+  },
+  "total_tokens_used": 0,
+  "total_token_limit": 24000000,
+  "total_remaining": 24000000
+}
+```
+
+### Service Health Status
+```
+NAME            STATUS
+Archon-Agents   Up 3 hours (healthy)
+Archon-MCP      Up 3 hours (healthy)  
+Archon-Server   Up 22 seconds (healthy)
+Archon-UI       Up 3 hours (healthy)
+```
+
+## Code Components Involved
+
+### Key Files Modified/Analyzed
+- `/python/src/server/services/token_tracking_service.py` - Token tracking logic
+- `/python/src/server/services/openai_free_wrapper.py` - Provider wrapper with fallback
+- `/python/database/migrations/create_token_usage_table.sql` - Migration script
+- `/python/src/server/api_routes/settings_api.py` - Settings API endpoints
+
+### Service Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Archon Server (Port 8181)                │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
+│  │ Credential      │  │ Token Tracking  │  │ LLM Provider │ │
+│  │ Service         │  │ Service         │  │ Service      │ │
+│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │         OpenAI Free Wrapper                             │ │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │ │
+│  │  │ Rate Limit  │  │ Fallback    │  │ Usage Tracking  │  │ │
+│  │  │ Check       │  │ Logic       │  │                 │  │ │
+│  │  └─────────────┘  └─────────────┘  └─────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Database (Supabase PostgreSQL)                 │
+│  ┌─────────────────┐                                        │
+│  │ archon_token_   │  ← MISSING TABLE CAUSED THE ISSUE     │
+│  │ usage           │                                        │
+│  └─────────────────┘                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Prevention and Monitoring
+
+### Migration Considerations
+1. **Database Initialization**: Ensure migration scripts are run during deployment
+2. **Health Checks**: Add database schema validation to health endpoints
+3. **Error Handling**: Improve error messages for missing tables
+4. **Fallback Notifications**: Log when fallback provider is used due to failures
+
+### Monitoring Recommendations
+1. **Token Usage Alerts**: Monitor daily usage patterns
+2. **Provider Health**: Track OpenAI Free vs fallback usage ratios  
+3. **Database Monitoring**: Alert on missing tables or connection issues
+4. **Performance Metrics**: Track token tracking service response times
+
+### Future Improvements
+1. **Auto-Migration**: Implement automatic table creation if missing
+2. **Graceful Degradation**: Better handling of database connectivity issues
+3. **User Notifications**: Alert users when fallback provider is being used
+4. **Usage Analytics**: Dashboard for token usage trends and patterns
+
+## Troubleshooting Guide
+
+### Common Issues and Solutions
+
+#### Issue: "relation archon_token_usage does not exist"
+**Solution**: Run the table creation commands above
+
+#### Issue: OpenAI Free requests failing
+**Checklist**:
+1. Verify `OPENAI_API_KEY` is set correctly
+2. Check `LLM_BASE_URL` is `https://api.openai.com/v1`
+3. Confirm `archon_token_usage` table exists
+4. Validate token limits haven't been exceeded
+
+#### Issue: Fallback provider being used unexpectedly
+**Debug Steps**:
+1. Check token usage: `curl http://localhost:8181/api/openai-free/usage`
+2. Review server logs for token limit warnings
+3. Verify OpenAI Free configuration in settings
+4. Test direct OpenAI API connectivity
+
+### Recovery Commands
+```bash
+# Quick health check
+curl http://localhost:8181/health
+
+# Check token usage
+curl http://localhost:8181/api/openai-free/usage
+
+# Restart if needed
+docker compose restart archon-server
+
+# Emergency table creation
+docker exec supabase-db psql -U postgres -c "CREATE TABLE IF NOT EXISTS archon_token_usage (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), provider_name VARCHAR(50) NOT NULL, model_name VARCHAR(100) NOT NULL, usage_date DATE NOT NULL DEFAULT CURRENT_DATE, tokens_used INTEGER NOT NULL DEFAULT 0, token_limit INTEGER NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT now(), updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(), UNIQUE(provider_name, model_name, usage_date));"
+```
+
+## Impact Assessment
+
+### Before Fix
+- ❌ OpenAI Free provider unusable
+- ❌ All requests falling back to llama3.1:8b
+- ❌ User confusion about model selection
+- ❌ No token usage tracking or limits
+
+### After Fix
+- ✅ OpenAI Free provider fully functional
+- ✅ gpt-5-mini correctly used with 2.5M token daily limit
+- ✅ Proper fallback behavior when limits exceeded
+- ✅ Token usage tracking and monitoring operational
+- ✅ User settings page displays correctly
+
+## Conclusion
+
+This issue demonstrates the importance of:
+1. **Complete Database Migrations**: Ensuring all required tables exist
+2. **Graceful Error Handling**: Better failure modes for missing dependencies  
+3. **Comprehensive Health Checks**: Database schema validation
+4. **Clear Documentation**: For troubleshooting similar issues
+
+The fix restores full functionality to the OpenAI Free provider while maintaining the intelligent fallback system for when token limits are exceeded. Users can now properly utilize the gpt-5-mini model with its generous 2.5M daily token limit.
+
+---
+
+*This documentation serves as both an incident report and troubleshooting guide for future reference through the Archon RAG system.*

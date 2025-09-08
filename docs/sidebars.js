@@ -65,5 +65,14 @@ module.exports = {
         'server-monitoring',
       ],
     },
+    
+    // TROUBLESHOOTING
+    {
+      type: 'category',
+      label: 'Troubleshooting',
+      items: [
+        'troubleshooting-openai-free-provider',
+      ],
+    },
   ],
 };
