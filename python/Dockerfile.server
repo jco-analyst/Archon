@@ -52,6 +52,9 @@ COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 RUN playwright install chromium
 
+# Pre-download the reranking model to avoid startup delays
+RUN python -c "from sentence_transformers import CrossEncoder; print('Downloading Qwen3-Reranker-4B...'); CrossEncoder('Qwen/Qwen3-Reranker-4B'); print('Model download complete!')"
+
 # Copy server code and tests
 COPY src/server/ src/server/
 COPY src/__init__.py src/
