@@ -35,19 +35,56 @@ class OpenAIFreeClientWrapper:
         self._fallback_client = None
         self._is_using_fallback = False
         
+    async def _get_fallback_config(self) -> Dict[str, Any]:
+        """Get complete fallback configuration from credentials."""
+        try:
+            config = {
+                "provider": await credential_service.get_credential("OPENAI_FREE_FALLBACK_PROVIDER"),
+                "model": await credential_service.get_credential("OPENAI_FREE_FALLBACK_MODEL"),
+                "base_url": await credential_service.get_credential("OPENAI_FREE_FALLBACK_BASE_URL")
+            }
+            
+            # If no specific fallback config exists, use current RAG settings as fallback
+            if not config["provider"]:
+                logger.warning("No OpenAI Free fallback provider configured, using current RAG settings")
+                rag_settings = await credential_service.get_credentials_by_category("rag_strategy")
+                config["provider"] = rag_settings.get("FALLBACK_PROVIDER", "localcloudcode")
+                config["model"] = rag_settings.get("MODEL_CHOICE", "llama3.1:8b")
+                config["base_url"] = rag_settings.get("LLM_BASE_URL")
+            
+            return config
+        except Exception as e:
+            logger.error(f"Error getting fallback configuration: {e}")
+            # Return safe defaults
+            return {
+                "provider": "localcloudcode",
+                "model": "llama3.1:8b", 
+                "base_url": "http://localhost:11222"
+            }
+        
     async def _get_fallback_client(self):
         """Get or create fallback client when needed."""
-        if self._fallback_client is None and self.fallback_provider:
+        if self._fallback_client is None:
             try:
+                # Get complete fallback configuration
+                fallback_config = await self._get_fallback_config()
+                
+                if not fallback_config["provider"]:
+                    logger.warning("No fallback provider configured")
+                    return None
+                
                 # Import here to avoid circular import
                 from .llm_provider_service import get_llm_client
                 
-                logger.info(f"Initializing fallback client for provider: {self.fallback_provider}")
-                # This returns an async context manager, so we need to enter it
-                self._fallback_context = get_llm_client(provider=self.fallback_provider)
+                logger.info(f"Initializing fallback client | provider={fallback_config['provider']} | model={fallback_config['model']} | base_url={fallback_config['base_url']}")
+                
+                # For now, use the existing provider infrastructure
+                # The model and base_url will be handled by the provider's configuration
+                # TODO: Future enhancement could override specific model/base_url per request
+                self._fallback_context = get_llm_client(provider=fallback_config["provider"])
                 self._fallback_client = await self._fallback_context.__aenter__()
                 
-                logger.info(f"Fallback client initialized successfully: {self.fallback_provider}")
+                logger.info(f"Fallback client initialized successfully: {fallback_config['provider']}")
             except Exception as e:
                 logger.error(f"Failed to initialize fallback client: {e}")
                 self._fallback_client = None
@@ -298,7 +335,7 @@ async def get_openai_free_client(fallback_provider: Optional[str] = None) -> Asy
     Create OpenAI Free client with token tracking and fallback.
     
     Args:
-        fallback_provider: Provider to use when token limits are exceeded
+        fallback_provider: Provider to use when token limits are exceeded (optional, reads from config if not provided)
         
     Yields:
         OpenAIFreeClientWrapper: Configured client wrapper
@@ -310,6 +347,10 @@ async def get_openai_free_client(fallback_provider: Optional[str] = None) -> Asy
     
     # Create base OpenAI client
     openai_client = openai.AsyncOpenAI(api_key=api_key, base_url="https://api.openai.com/v1")
+    
+    # Get fallback provider from configuration if not provided
+    if not fallback_provider:
+        fallback_provider = await credential_service.get_credential("OPENAI_FREE_FALLBACK_PROVIDER")
     
     # Create wrapper with fallback support
     wrapper = OpenAIFreeClientWrapper(openai_client, fallback_provider)
