@@ -214,8 +214,20 @@ class BaseAgent(ABC, Generic[DepsT, OutputT]):
                 timeout=120.0,  # 2 minute timeout for agent operations
             )
             self.logger.info(f"Agent {self.name} completed successfully")
-            # PydanticAI returns a RunResult with data attribute
-            return result.data
+            
+            # Handle different PydanticAI result object attributes
+            if hasattr(result, 'output'):
+                return result.output
+            elif hasattr(result, 'data'):
+                return result.data
+            elif hasattr(result, 'content'):
+                return result.content
+            elif hasattr(result, 'message'):
+                return result.message
+            else:
+                # Fallback: return the result object itself or string representation
+                self.logger.warning(f"Unknown result object type: {type(result)}, attributes: {dir(result)}")
+                return str(result)
         except TimeoutError:
             self.logger.error(f"Agent {self.name} timed out after 120 seconds")
             raise Exception(f"Agent {self.name} operation timed out - taking too long to respond")

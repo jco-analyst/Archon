@@ -173,12 +173,27 @@ async def run_agent(request: AgentRequest):
 
         agent = app.state.agents[request.agent_type]
 
-        # Prepare dependencies for the agent
-        deps = {
-            "context": request.context or {},
-            "options": request.options or {},
-            "mcp_endpoint": os.getenv("MCP_SERVICE_URL", "http://archon-mcp:8051"),
-        }
+        # Prepare dependencies based on agent type
+        if request.agent_type == "rag":
+            from .rag_agent import RagDependencies
+            
+            deps = RagDependencies(
+                source_filter=request.context.get("source_filter") if request.context else None,
+                match_count=request.context.get("match_count", 5) if request.context else 5,
+                project_id=request.context.get("project_id") if request.context else None,
+            )
+        elif request.agent_type == "document":
+            from .document_agent import DocumentDependencies
+            
+            deps = DocumentDependencies(
+                project_id=request.context.get("project_id") if request.context else None,
+                user_id=request.context.get("user_id") if request.context else None,
+            )
+        else:
+            # Default dependencies for unknown agent types
+            from .base_agent import ArchonDependencies
+            
+            deps = ArchonDependencies()
 
         # Run the agent
         result = await agent.run(request.prompt, deps)

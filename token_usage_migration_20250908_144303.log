@@ -1,0 +1,3 @@
+2025-09-08 14:43:03,838 - INFO - Connecting to database...
+2025-09-08 14:43:03,908 - ERROR - ❌ Failed to connect to database: [Errno -2] Name or service not known
+2025-09-08 14:43:03,909 - ERROR - Failed to connect to database
