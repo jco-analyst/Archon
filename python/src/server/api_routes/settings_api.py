@@ -16,6 +16,7 @@ from pydantic import BaseModel
 # Import logging
 from ..config.logfire_config import logfire
 from ..services.credential_service import credential_service, initialize_credentials
+from ..services.llm_provider_service import clear_provider_cache
 from ..utils import get_supabase_client
 
 router = APIRouter(prefix="/api", tags=["settings"])
@@ -38,7 +39,15 @@ class CredentialUpdateRequest(BaseModel):
 # OpenAI Free Provider Configuration Models
 class OpenAIFreeConfigRequest(BaseModel):
     fallback_provider: str | None = None
+    fallback_model: str | None = None
+    fallback_base_url: str | None = None
     enable_token_tracking: bool = True
+
+
+class OpenAIFreeFallbackConfig(BaseModel):
+    provider: str
+    model: str
+    base_url: str | None = None
 
 
 class OpenAIFreeUsageResponse(BaseModel):
@@ -246,6 +255,12 @@ async def update_credential(key: str, request: dict[str, Any]):
                 f"Credential updated successfully | key={key} | is_encrypted={is_encrypted}"
             )
 
+            # Clear provider cache if provider-related settings changed
+            provider_keys = ["LLM_PROVIDER", "EMBEDDING_PROVIDER", "LLM_BASE_URL", "EMBEDDING_BASE_URL"]
+            if key in provider_keys:
+                clear_provider_cache()
+                logfire.info(f"Provider cache cleared due to {key} update")
+
             return {"success": True, "message": f"Credential {key} updated successfully"}
         else:
             logfire.error(f"Failed to update credential | key={key}")
@@ -351,8 +366,9 @@ async def configure_openai_free(request: OpenAIFreeConfigRequest):
     try:
         logfire.info(f"Configuring OpenAI Free provider | fallback={request.fallback_provider}")
         
-        # Store fallback provider setting
+        # Store fallback provider settings
         if request.fallback_provider:
+            # Store fallback provider
             success = await credential_service.set_credential(
                 key="OPENAI_FREE_FALLBACK_PROVIDER",
                 value=request.fallback_provider,
@@ -363,6 +379,32 @@ async def configure_openai_free(request: OpenAIFreeConfigRequest):
             
             if not success:
                 raise HTTPException(status_code=500, detail={"error": "Failed to save fallback provider setting"})
+            
+            # Store fallback model if provided
+            if request.fallback_model:
+                success = await credential_service.set_credential(
+                    key="OPENAI_FREE_FALLBACK_MODEL",
+                    value=request.fallback_model,
+                    is_encrypted=False,
+                    category="rag_strategy",
+                    description="Fallback model when OpenAI Free token limits are exceeded"
+                )
+                
+                if not success:
+                    raise HTTPException(status_code=500, detail={"error": "Failed to save fallback model setting"})
+            
+            # Store fallback base URL if provided
+            if request.fallback_base_url:
+                success = await credential_service.set_credential(
+                    key="OPENAI_FREE_FALLBACK_BASE_URL",
+                    value=request.fallback_base_url,
+                    is_encrypted=False,
+                    category="rag_strategy",
+                    description="Fallback base URL when OpenAI Free token limits are exceeded"
+                )
+                
+                if not success:
+                    raise HTTPException(status_code=500, detail={"error": "Failed to save fallback base URL setting"})
         
         # Store token tracking setting
         success = await credential_service.set_credential(
@@ -382,6 +424,8 @@ async def configure_openai_free(request: OpenAIFreeConfigRequest):
             "success": True,
             "message": "OpenAI Free provider configured successfully",
             "fallback_provider": request.fallback_provider,
+            "fallback_model": request.fallback_model,
+            "fallback_base_url": request.fallback_base_url,
             "token_tracking_enabled": request.enable_token_tracking
         }
         
@@ -429,14 +473,18 @@ async def get_openai_free_config():
     try:
         logfire.info("Getting OpenAI Free provider configuration")
         
-        # Get fallback provider
+        # Get all fallback configuration settings
         fallback_provider = await credential_service.get_credential("OPENAI_FREE_FALLBACK_PROVIDER")
+        fallback_model = await credential_service.get_credential("OPENAI_FREE_FALLBACK_MODEL")
+        fallback_base_url = await credential_service.get_credential("OPENAI_FREE_FALLBACK_BASE_URL")
         
         # Get token tracking setting
         token_tracking_enabled = await credential_service.get_credential("OPENAI_FREE_TOKEN_TRACKING_ENABLED", "true")
         
         config = {
             "fallback_provider": fallback_provider,
+            "fallback_model": fallback_model,
+            "fallback_base_url": fallback_base_url,
             "enable_token_tracking": str(token_tracking_enabled).lower() == "true",
             "available_fallback_providers": ["openai", "google", "ollama", "localcloudcode"]
         }
@@ -448,6 +496,73 @@ async def get_openai_free_config():
     except Exception as e:
         logfire.error(f"Error getting OpenAI Free configuration | error={str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post("/openai-free/test")
+async def test_openai_free_client(model: str = None):
+    """Test OpenAI Free client with specified model to verify configuration."""
+    try:
+        # If no model specified, get the current model from RAG settings
+        if not model:
+            from ..services.credential_service import credential_service
+            rag_settings = await credential_service.get_credentials_by_category("rag_strategy")
+            model = rag_settings.get("MODEL_CHOICE", "gpt-5-mini")
+        
+        logfire.info(f"Testing OpenAI Free client with model: {model}")
+        
+        # Import the OpenAI Free wrapper
+        from ..services.openai_free_wrapper import get_openai_free_client
+        
+        # Test message
+        test_messages = [
+            {"role": "user", "content": "Hello, respond with just 'OK' to confirm you received this message."}
+        ]
+        
+        async with get_openai_free_client() as client:
+            # Create chat completion
+            # Use max_completion_tokens for newer models, fallback to max_tokens for older models
+            try:
+                response = await client.create_chat_completion(
+                    model=model,
+                    messages=test_messages,
+                    max_completion_tokens=10
+                    # Note: No temperature for newer models like gpt-5-mini
+                )
+            except Exception as e:
+                if "max_completion_tokens" in str(e):
+                    # Fallback to max_tokens for older models
+                    response = await client.create_chat_completion(
+                        model=model,
+                        messages=test_messages,
+                        max_tokens=10
+                        # Note: Older models may support temperature=0
+                    )
+                else:
+                    raise e
+            
+            # Extract response details
+            result = {
+                "success": True,
+                "model_requested": model,
+                "model_used": response.model,
+                "response_content": response.choices[0].message.content,
+                "token_usage": {
+                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                    "total_tokens": response.usage.total_tokens if response.usage else 0
+                }
+            }
+            
+            logfire.info(f"OpenAI Free test successful | model_requested={model} | model_used={response.model}")
+            return result
+            
+    except Exception as e:
+        logfire.error(f"OpenAI Free test failed | error={str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "model_requested": model
+        }
 
 
 @router.delete("/openai-free/usage/cleanup")

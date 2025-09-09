@@ -37,6 +37,19 @@ def _set_cached_settings(key: str, value: Any) -> None:
     """Cache settings with current timestamp."""
     _settings_cache[key] = (value, time.time())
 
+def clear_provider_cache() -> None:
+    """Clear provider-related cache entries when provider settings change."""
+    keys_to_clear = [
+        "provider_config_llm",
+        "provider_config_embedding", 
+        "rag_strategy_settings"
+    ]
+    for key in keys_to_clear:
+        if key in _settings_cache:
+            del _settings_cache[key]
+            logger.info(f"Cleared cache key: {key}")
+
+
 
 @asynccontextmanager
 async def get_llm_client(provider: str | None = None, use_embedding_provider: bool = False):
