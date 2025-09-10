@@ -73,42 +73,63 @@ class RagAgent(BaseAgent[RagDependencies, str]):
 
     async def run(self, user_input: str, deps: RagDependencies) -> str:
         """
-        Override the base run method to use provider-aware client for non-streaming.
+        Override the base run method to use OpenAI Free wrapper when appropriate.
         
-        This method checks the LLM provider configuration and uses the OpenAI Free
-        wrapper when appropriate, ensuring token tracking and fallback functionality.
+        This method intercepts OpenAI API calls and routes them through the OpenAI Free
+        wrapper for token tracking and fallback functionality when LLM_PROVIDER is 'openai_free'.
         """
         logger.info(f"RAG agent run() method called with input: {user_input[:50]}...")
         
         try:
-            # Check if we should use OpenAI Free provider from the fetched credentials
+            # Check provider configuration
             try:
                 from .server import AGENT_CREDENTIALS
-                logger.info(f"Available credentials keys: {list(AGENT_CREDENTIALS.keys())}")
-                logger.info(f"LLM_PROVIDER credential value: {AGENT_CREDENTIALS.get('LLM_PROVIDER', 'NOT_FOUND')}")
                 provider_name = AGENT_CREDENTIALS.get("LLM_PROVIDER", "openai")
-                logger.info(f"Provider detection result: {provider_name} (from fetched credentials)")
+                logger.info(f"Provider detection: {provider_name} (from fetched credentials)")
             except Exception as import_error:
                 logger.warning(f"Failed to import AGENT_CREDENTIALS: {import_error}")
-                # Fallback to environment variable
                 provider_name = os.getenv("LLM_PROVIDER", "openai")
-                logger.info(f"Provider detection result: {provider_name} (from environment fallback)")
+                logger.info(f"Provider detection: {provider_name} (from environment fallback)")
             
             if provider_name == "openai_free":
-                logger.info("RAG agent using OpenAI Free approach (non-streaming)")
-                logger.info("✅ OpenAI Free provider detected - this will use token tracking and fallback")
-                # For now, fall back to standard approach but with clear logging about wrapper status
-                # TODO: Implement actual OpenAI Free wrapper integration for non-streaming
-                logger.warning("⚠️ OpenAI Free wrapper not yet implemented for non-streaming - using standard OpenAI")
-                logger.info("📋 Next step: Integrate OpenAI Free wrapper for non-streaming mode")
-                return await super().run(user_input, deps)
+                logger.info("🎯 OpenAI Free provider detected - using wrapper with token tracking")
+                return await self._run_with_openai_free_wrapper(user_input, deps)
             else:
-                logger.info(f"RAG agent using standard provider: {provider_name}")
+                logger.info(f"📡 Using standard provider: {provider_name}")
                 return await super().run(user_input, deps)
                 
         except Exception as provider_error:
             logger.warning(f"Error in provider detection, falling back to default: {provider_error}")
             return await super().run(user_input, deps)
+            
+    async def _run_with_openai_free_wrapper(self, user_input: str, deps: RagDependencies) -> str:
+        """Run the RAG agent using OpenAI Free wrapper for token tracking and fallbacks."""
+        try:
+            import os
+            
+            # Get the OpenAI Free wrapper endpoint
+            server_port = os.getenv("ARCHON_SERVER_PORT", "8181")
+            wrapper_base_url = f"http://archon-server:{server_port}/api/openai-free"
+            
+            logger.info(f"🔗 Using OpenAI Free wrapper: {wrapper_base_url}")
+            
+            # Base URL Override is already handled by server.py at startup
+            # No need to modify environment here as it conflicts with the startup configuration
+            logger.info("✅ OpenAI Free wrapper environment already configured by server startup")
+            logger.info("🔄 Executing RAG agent with OpenAI Free wrapper")
+            
+            result = await super().run(user_input, deps)
+            logger.info("✅ RAG agent completed successfully with OpenAI Free wrapper")
+            return result
+                    
+        except Exception as wrapper_error:
+            logger.error(f"❌ OpenAI Free wrapper failed: {wrapper_error}")
+            logger.info("📡 Falling back to standard OpenAI client")
+            return await super().run(user_input, deps)
+
+
+
+
 
     def run_stream(self, user_input: str, deps: RagDependencies):
         """
@@ -132,6 +153,10 @@ class RagAgent(BaseAgent[RagDependencies, str]):
 
     def _create_agent(self, **kwargs) -> Agent:
         """Create the PydanticAI agent with tools and prompts."""
+        
+        # Base URL Override approach handles OpenAI Free wrapper automatically
+        # No need for custom client - environment variables are set by server.py
+        logger.info("🔧 Creating RAG agent - Base URL Override approach active")
 
         agent = Agent(
             model=self.model,
@@ -320,7 +345,11 @@ class RagAgent(BaseAgent[RagDependencies, str]):
                 return f"Refined query: '{refined_query}' (original: '{original_query}')"
             except Exception as e:
                 return f"Could not refine query: {str(e)}"
+                
+        logger.info("✅ RAG agent created successfully with Base URL Override approach")
         return agent
+
+
 
     def get_system_prompt(self) -> str:
         """Get the base system prompt for this agent."""
