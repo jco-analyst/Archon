@@ -81,6 +81,9 @@ interface RAGSettingsProps {
     FALLBACK_PROVIDER?: string;
     FALLBACK_MODEL?: string;
     FALLBACK_BASE_URL?: string;
+    // Reranking Settings
+    RERANKING_PROVIDER?: string;
+    RERANKING_MODEL?: string;
     // Qwen3 Reranking Settings
     QWEN3_TORCH_DTYPE?: string;
     QWEN3_DEVICE?: string;
@@ -115,7 +118,6 @@ export const RAGSettings = ({
   const [saving, setSaving] = useState(false);
   const [showCrawlingSettings, setShowCrawlingSettings] = useState(false);
   const [showStorageSettings, setShowStorageSettings] = useState(false);
-  const [showQwen3Settings, setShowQwen3Settings] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<Array<{name: string, size?: number}>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
   const { showToast } = useToast();
@@ -494,127 +496,63 @@ export const RAGSettings = ({
             <CustomCheckbox 
               id="reranking" 
               checked={ragSettings.USE_RERANKING} 
-              onChange={e => setRagSettings({
-                ...ragSettings,
-                USE_RERANKING: e.target.checked
-              })} 
+              onChange={e => {
+                const newSettings = {
+                  ...ragSettings,
+                  USE_RERANKING: e.target.checked
+                };
+                // Auto-populate reranking settings when enabled
+                if (e.target.checked) {
+                  newSettings.RERANKING_PROVIDER = 'huggingface';
+                  newSettings.RERANKING_MODEL = 'Qwen/Qwen3-Reranker-0.6B';
+                }
+                setRagSettings(newSettings);
+              }} 
               label="Use Reranking" 
               description="Uses Qwen3-Reranker-4B for superior search result relevance scoring"
             />
           </div>
           <div>{/* Empty column */}</div>
         </div>
-        {/* Qwen3 Reranking Settings - Only show when reranking is enabled */}
+        {/* Reranking Provider Section - Only show when reranking is enabled */}
         {ragSettings.USE_RERANKING && (
-          <div className="mt-4">
-            <div
-              className="flex items-center justify-between cursor-pointer p-3 rounded-lg border border-purple-500/20 bg-gradient-to-r from-purple-500/5 to-purple-600/5 hover:from-purple-500/10 hover:to-purple-600/10 transition-all duration-200"
-              onClick={() => setShowQwen3Settings(!showQwen3Settings)}
-            >
-              <div className="flex items-center">
-                <Settings className="mr-2 text-purple-500 filter drop-shadow-[0_0_8px_rgba(147,51,234,0.6)]" size={18} />
-                <h3 className="font-semibold text-gray-800 dark:text-white">Qwen3 Reranker Optimization</h3>
+          <div className="mt-6 mb-6 p-4 rounded-lg border border-purple-500/20 bg-gradient-to-r from-purple-500/5 to-purple-600/5">
+            <h3 className="font-semibold text-gray-800 dark:text-white mb-3">Reranking Provider Settings</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Select
+                  label="Reranking Provider"
+                  value={ragSettings.RERANKING_PROVIDER || 'huggingface'}
+                  onChange={e => handleRerankingProviderChange(e.target.value, ragSettings, setRagSettings)}
+                  accentColor="purple"
+                  options={[
+                    { value: 'huggingface', label: 'HuggingFace' },
+                  ]}
+                  disabled={true}
+                />
               </div>
-              {showQwen3Settings ? (
-                <ChevronUp className="text-gray-500 dark:text-gray-400" size={20} />
-              ) : (
-                <ChevronDown className="text-gray-500 dark:text-gray-400" size={20} />
-              )}
+              <div>
+                <Select
+                  label="Reranking Model"
+                  value={ragSettings.RERANKING_MODEL || 'Qwen/Qwen3-Reranker-0.6B'}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    RERANKING_MODEL: e.target.value
+                  })}
+                  accentColor="purple"
+                  options={[
+                    { value: 'Qwen/Qwen3-Reranker-0.6B', label: 'Qwen3-Reranker-0.6B (Recommended)' },
+                    { value: 'Qwen/Qwen3-Reranker-4B', label: 'Qwen3-Reranker-4B (High VRAM)' },
+                  ]}
+                />
+              </div>
+              <div>
+                <div className="text-xs text-purple-600 dark:text-purple-400 mt-8">
+                  <p><strong>0.6B Model:</strong> ~2.4GB VRAM (GTX 1080 Ti compatible)</p>
+                  <p><strong>4B Model:</strong> ~16GB VRAM required</p>
+                </div>
+              </div>
             </div>
-            
-            {showQwen3Settings && (
-              <div className="mt-4 p-4 border border-purple-500/10 rounded-lg bg-purple-500/5">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Model Precision
-                    </label>
-                    <select
-                      value={ragSettings.QWEN3_TORCH_DTYPE || 'auto'}
-                      onChange={e => setRagSettings({
-                        ...ragSettings,
-                        QWEN3_TORCH_DTYPE: e.target.value === 'auto' ? undefined : e.target.value
-                      })}
-                      className="w-full px-3 py-2 border border-purple-500/30 rounded-md bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                      <option value="auto">Auto (Recommended)</option>
-                      <option value="float16">Half Precision (float16) - Memory Efficient</option>
-                      <option value="bfloat16">Brain Float (bfloat16) - Balanced</option>
-                      <option value="float32">Full Precision (float32) - CPU/Stability</option>
-                    </select>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Lower precision uses less memory but may reduce accuracy</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Device Selection
-                    </label>
-                    <select
-                      value={ragSettings.QWEN3_DEVICE || 'auto'}
-                      onChange={e => setRagSettings({
-                        ...ragSettings,
-                        QWEN3_DEVICE: e.target.value === 'auto' ? undefined : e.target.value
-                      })}
-                      className="w-full px-3 py-2 border border-purple-500/30 rounded-md bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                      <option value="auto">Auto Detect</option>
-                      <option value="cuda">CUDA GPU (Fastest)</option>
-                      <option value="cpu">CPU Only (Slower)</option>
-                    </select>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">GPU provides significant speed improvement</p>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Max Context Length
-                    </label>
-                    <input
-                      type="number"
-                      min="1024"
-                      max="16384"
-                      step="1024"
-                      value={ragSettings.QWEN3_MAX_LENGTH || 8192}
-                      onChange={e => setRagSettings({
-                        ...ragSettings,
-                        QWEN3_MAX_LENGTH: parseInt(e.target.value, 10) || 8192
-                      })}
-                      className="w-full px-3 py-2 border border-purple-500/30 rounded-md bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Maximum tokens for query+document pairs</p>
-                  </div>
-                  <div className="flex items-center mt-6">
-                    <CustomCheckbox
-                      id="qwen3FlashAttention"
-                      checked={ragSettings.QWEN3_USE_FLASH_ATTENTION !== false}
-                      onChange={e => setRagSettings({
-                        ...ragSettings,
-                        QWEN3_USE_FLASH_ATTENTION: e.target.checked
-                      })}
-                      label="Flash Attention"
-                      description="Accelerates inference on compatible GPUs (RTX 3080+, A100, H100)"
-                    />
-                  </div>
-                </div>
-                
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Custom Instruction (Optional)
-                  </label>
-                  <textarea
-                    value={ragSettings.QWEN3_INSTRUCTION || ''}
-                    onChange={e => setRagSettings({
-                      ...ragSettings,
-                      QWEN3_INSTRUCTION: e.target.value || undefined
-                    })}
-                    placeholder="Given a web search query, retrieve relevant passages that answer the query"
-                    rows={2}
-                    className="w-full px-3 py-2 border border-purple-500/30 rounded-md bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave empty to use default instruction for web search relevance</p>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -934,6 +872,24 @@ function handleFallbackProviderChange(provider: string, ragSettings: any, setRag
     FALLBACK_MODEL: getDefaultChatModel(provider),
     FALLBACK_BASE_URL: getDefaultBaseUrl(provider)
   });
+}
+// Handler for reranking provider changes (with auto-population)
+function handleRerankingProviderChange(provider: string, ragSettings: any, setRagSettings: any): void {
+  setRagSettings({
+    ...ragSettings,
+    RERANKING_PROVIDER: provider,
+    RERANKING_MODEL: getDefaultRerankingModel(provider)
+  });
+}
+
+// Helper to get default reranking models
+function getDefaultRerankingModel(provider: string): string {
+  switch (provider) {
+    case 'huggingface':
+      return 'Qwen/Qwen3-Reranker-0.6B'; // Recommended for GTX 1080 Ti
+    default:
+      return 'Qwen/Qwen3-Reranker-0.6B';
+  }
 }
 
 // Helper to get default base URLs

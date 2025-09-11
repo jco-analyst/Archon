@@ -206,10 +206,17 @@ def register_rag_tools(mcp: FastMCP):
         This tool uses Archon's document upload API to process markdown content.
         The document will be chunked, embedded, and stored in the vector database.
 
+        IMPORTANT FOR CONTEXT DETECTION:
+        - If source_id is not provided, try to detect the current project context
+        - For git repositories, use: git remote get-url origin to get repo name
+        - For local projects, use the current directory name
+        - Avoid generic source IDs - use meaningful project names like "archon", "my-project"
+        - This enables better RAG filtering when searching within specific projects
+
         Args:
             content: The markdown content to add to the RAG system
             filename: Name for the document (used for source identification)
-            source_id: Optional custom source ID (auto-generated if not provided)
+            source_id: Optional custom source ID - detect current project if not provided
             tags: Optional list of tags to associate with the document
             knowledge_type: Type of knowledge (default: "documentation")
 
@@ -217,9 +224,11 @@ def register_rag_tools(mcp: FastMCP):
             JSON string with processing results including chunks stored and word count
 
         Example:
+            # Auto-detect project context
             add_markdown_document(
                 content="# API Documentation\\n\\nThis explains the REST API...",
                 filename="api_docs.md",
+                source_id="archon",  # Detected from git repo or directory
                 tags=["api", "documentation"]
             )
         """
@@ -242,6 +251,10 @@ def register_rag_tools(mcp: FastMCP):
                 'knowledge_type': knowledge_type,
                 'tags': json.dumps(tags or [])
             }
+            
+            # Add project context if source_id provided
+            if source_id and source_id.strip():
+                form_data['project_context'] = source_id.strip()
             
             # Get API URL
             api_url = get_api_url()
@@ -387,6 +400,7 @@ def register_rag_tools(mcp: FastMCP):
                 "error": error_msg,
                 "filename": filename if 'filename' in locals() else "unknown"
             }, indent=2)
+
 
 
 

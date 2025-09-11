@@ -510,11 +510,12 @@ async def upload_document(
     file: UploadFile = File(...),
     tags: str | None = Form(None),
     knowledge_type: str = Form("technical"),
+    project_context: str | None = Form(None),
 ):
     """Upload and process a document with progress tracking."""
     try:
         safe_logfire_info(
-            f"Starting document upload | filename={file.filename} | content_type={file.content_type} | knowledge_type={knowledge_type}"
+            f"Starting document upload | filename={file.filename} | content_type={file.content_type} | knowledge_type={knowledge_type} | project_context={project_context}"
         )
 
         # Generate unique progress ID
@@ -529,6 +530,7 @@ async def upload_document(
             "filename": file.filename,
             "content_type": file.content_type,
             "size": len(file_content),
+            "project_context": project_context,  # Add context to metadata
         }
         # Start progress tracking
         await start_crawl_progress(
@@ -567,6 +569,7 @@ async def upload_document(
             f"Failed to start document upload | error={str(e)} | filename={file.filename} | error_type={type(e).__name__}"
         )
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
 
 
 async def _perform_upload_with_progress(
@@ -628,8 +631,14 @@ async def _perform_upload_with_progress(
         doc_storage_service = DocumentStorageService(get_supabase_client())
 
         # Generate source_id from filename
-        source_id = f"file_{filename.replace(' ', '_').replace('.', '_')}_{int(time.time())}"
-
+        # Generate smart source_id using project context or clean filename
+        project_context = file_metadata.get("project_context")
+        if project_context and project_context.strip():
+            source_id = project_context.strip()
+        else:
+            # Clean filename without timestamp
+            clean_name = filename.replace(' ', '_').replace('.', '_').lower()
+            source_id = f"file_{clean_name}"
         # Create progress callback that emits to Socket.IO with mapped progress
         async def document_progress_callback(
             message: str, percentage: int, batch_info: dict = None
