@@ -79,6 +79,8 @@ interface RAGSettingsProps {
     EMBEDDING_PROVIDER?: string;
     EMBEDDING_BASE_URL?: string;
     FALLBACK_PROVIDER?: string;
+    FALLBACK_MODEL?: string;
+    FALLBACK_BASE_URL?: string;
     // Qwen3 Reranking Settings
     QWEN3_TORCH_DTYPE?: string;
     QWEN3_DEVICE?: string;
@@ -227,15 +229,16 @@ export const RAGSettings = ({
           {/* Fallback Provider Selection - Only show when OpenAI Free is selected */}
           {ragSettings.LLM_PROVIDER === 'openai_free' && (
             <div className="mt-4 p-3 rounded-lg border border-yellow-500/20 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
-              <div className="grid grid-cols-2 gap-4">
+              <h4 className="font-medium text-gray-800 dark:text-white mb-3 flex items-center">
+                <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+                Fallback Provider Configuration
+              </h4>
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <Select
                     label="Fallback Provider"
                     value={ragSettings.FALLBACK_PROVIDER || 'openai'}
-                    onChange={e => setRagSettings({
-                      ...ragSettings,
-                      FALLBACK_PROVIDER: e.target.value
-                    })}
+                    onChange={e => handleFallbackProviderChange(e.target.value, ragSettings, setRagSettings)}
                     accentColor="yellow"
                     options={[
                       { value: 'openai', label: 'OpenAI (Paid)' },
@@ -245,15 +248,57 @@ export const RAGSettings = ({
                     ]}
                   />
                 </div>
-                <div className="flex items-end">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 pb-2">
-                    When daily token limits are exceeded, requests will automatically use this provider instead.
-                  </p>
+                <div>
+                  {ragSettings.FALLBACK_PROVIDER === 'ollama' ? (
+                    <Input
+                      label="Fallback Chat Model"
+                      placeholder="Enter model name (e.g., llama3.2:3b)"
+                      value={ragSettings.FALLBACK_MODEL || ''}
+                      onChange={e => setRagSettings({
+                        ...ragSettings,
+                        FALLBACK_MODEL: e.target.value
+                      })}
+                      accentColor="yellow"
+                    />
+                  ) : (
+                    <Select
+                      label="Fallback Chat Model"
+                      value={ragSettings.FALLBACK_MODEL || getDefaultChatModel(ragSettings.FALLBACK_PROVIDER || 'openai')}
+                      onChange={e => setRagSettings({
+                        ...ragSettings,
+                        FALLBACK_MODEL: e.target.value
+                      })}
+                      accentColor="yellow"
+                      options={getChatModelOptions(ragSettings.FALLBACK_PROVIDER || 'openai')}
+                    />
+                  )}
                 </div>
+                <div>
+                  <Input
+                    label="Fallback Base URL"
+                    value={ragSettings.FALLBACK_BASE_URL || getDefaultBaseUrl(ragSettings.FALLBACK_PROVIDER || 'openai')}
+                    onChange={e => setRagSettings({
+                      ...ragSettings,
+                      FALLBACK_BASE_URL: e.target.value
+                    })}
+                    placeholder={getDefaultBaseUrl(ragSettings.FALLBACK_PROVIDER || 'openai')}
+                    accentColor="yellow"
+                  />
+                </div>
+              </div>
+              <div className="mt-3">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  When daily token limits are exceeded, requests will automatically use this provider instead.
+                  {ragSettings.FALLBACK_PROVIDER === ragSettings.LLM_PROVIDER && (
+                    <span className="text-yellow-600 dark:text-yellow-400 block mt-1">
+                      ⚠️ Warning: Fallback provider should differ from primary provider
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
           )}
-        </div>
+            </div>
 
         {/* Embedding Provider Section */}
         <div className="mb-6 p-4 rounded-lg border border-blue-500/20 bg-gradient-to-r from-blue-500/5 to-blue-600/5">
@@ -800,7 +845,7 @@ export const RAGSettings = ({
             )}
           </button>
         </div>
-    </Card>
+    </Card>;
 };
 
 // Helper functions for model placeholders
@@ -881,6 +926,15 @@ function handleEmbeddingProviderChange(provider: string, ragSettings: any, setRa
     EMBEDDING_BASE_URL: getDefaultBaseUrl(provider)
   });
 }
+// Handler for fallback provider changes
+function handleFallbackProviderChange(provider: string, ragSettings: any, setRagSettings: any): void {
+  setRagSettings({
+    ...ragSettings,
+    FALLBACK_PROVIDER: provider,
+    FALLBACK_MODEL: getDefaultChatModel(provider),
+    FALLBACK_BASE_URL: getDefaultBaseUrl(provider)
+  });
+}
 
 // Helper to get default base URLs
 function getDefaultBaseUrl(provider: string): string {
@@ -890,13 +944,15 @@ function getDefaultBaseUrl(provider: string): string {
     case 'localcloudcode':
       return 'http://localhost:11222';
     case 'openai':
+      return 'https://api.openai.com/v1';
     case 'openai_free':
+      return 'https://api.openai.com/v1';
     case 'google':
+      return 'https://generativelanguage.googleapis.com/v1beta';
     default:
       return '';
   }
 }
-
 // Helper to get default chat base URLs  
 function getDefaultChatBaseUrl(provider: string): string {
   switch (provider) {
@@ -905,8 +961,11 @@ function getDefaultChatBaseUrl(provider: string): string {
     case 'localcloudcode':
       return 'http://localhost:11222';
     case 'openai':
+      return 'https://api.openai.com/v1';
     case 'openai_free':
+      return 'https://api.openai.com/v1';
     case 'google':
+      return 'https://generativelanguage.googleapis.com/v1beta';
     default:
       return '';
   }

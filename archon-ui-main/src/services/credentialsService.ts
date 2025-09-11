@@ -23,6 +23,8 @@ export interface RagSettings {
   EMBEDDING_BASE_URL?: string;
   EMBEDDING_MODEL?: string;
   FALLBACK_PROVIDER?: string;
+  FALLBACK_MODEL?: string;
+  FALLBACK_BASE_URL?: string;
   // Crawling Performance Settings
   CRAWL_BATCH_SIZE?: number;
   CRAWL_MAX_CONCURRENT?: number;
@@ -134,6 +136,8 @@ class CredentialsService {
       EMBEDDING_BASE_URL: '',
       EMBEDDING_MODEL: '',
       FALLBACK_PROVIDER: 'openai',
+      FALLBACK_MODEL: 'gpt-4o-mini',
+      FALLBACK_BASE_URL: 'https://api.openai.com/v1',
       // Crawling Performance Settings defaults
       CRAWL_BATCH_SIZE: 50,
       CRAWL_MAX_CONCURRENT: 10,
@@ -156,7 +160,7 @@ class CredentialsService {
     [...ragCredentials, ...apiKeysCredentials].forEach(cred => {
       if (cred.key in settings) {
         // String fields
-        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'FALLBACK_PROVIDER', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
+        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'FALLBACK_PROVIDER', 'FALLBACK_MODEL', 'FALLBACK_BASE_URL', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
           (settings as any)[cred.key] = cred.value || '';
         } 
         // Number fields
