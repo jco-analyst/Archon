@@ -536,6 +536,8 @@ async def initialize_credentials() -> None:
         "EMBEDDING_PROVIDER",  # Selected embedding provider (can be different from LLM_PROVIDER)
         "EMBEDDING_BASE_URL",  # Embedding provider base URL
         "EMBEDDING_MODEL",  # Custom embedding model
+        "RERANKING_PROVIDER",  # Selected reranking provider
+        "RERANKING_MODEL",  # Custom reranking model
         "MODEL_CHOICE",  # Chat model for sync contexts
     ]
 

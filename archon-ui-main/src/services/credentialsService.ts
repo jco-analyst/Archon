@@ -22,6 +22,8 @@ export interface RagSettings {
   EMBEDDING_PROVIDER?: string;
   EMBEDDING_BASE_URL?: string;
   EMBEDDING_MODEL?: string;
+  RERANKING_PROVIDER?: string;
+  RERANKING_MODEL?: string;
   FALLBACK_PROVIDER?: string;
   FALLBACK_MODEL?: string;
   FALLBACK_BASE_URL?: string;
@@ -135,6 +137,8 @@ class CredentialsService {
       EMBEDDING_PROVIDER: 'openai',
       EMBEDDING_BASE_URL: '',
       EMBEDDING_MODEL: '',
+      RERANKING_PROVIDER: 'huggingface',
+      RERANKING_MODEL: 'Qwen/Qwen3-Reranker-0.6B',
       FALLBACK_PROVIDER: 'openai',
       FALLBACK_MODEL: 'gpt-4o-mini',
       FALLBACK_BASE_URL: 'https://api.openai.com/v1',
@@ -160,7 +164,7 @@ class CredentialsService {
     [...ragCredentials, ...apiKeysCredentials].forEach(cred => {
       if (cred.key in settings) {
         // String fields
-        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'FALLBACK_PROVIDER', 'FALLBACK_MODEL', 'FALLBACK_BASE_URL', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
+        if (['MODEL_CHOICE', 'LLM_PROVIDER', 'LLM_BASE_URL', 'EMBEDDING_PROVIDER', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'RERANKING_PROVIDER', 'RERANKING_MODEL', 'FALLBACK_PROVIDER', 'FALLBACK_MODEL', 'FALLBACK_BASE_URL', 'CRAWL_WAIT_STRATEGY'].includes(cred.key)) {
           (settings as any)[cred.key] = cred.value || '';
         } 
         // Number fields

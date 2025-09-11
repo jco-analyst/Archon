@@ -256,7 +256,7 @@ async def update_credential(key: str, request: dict[str, Any]):
             )
 
             # Clear provider cache if provider-related settings changed
-            provider_keys = ["LLM_PROVIDER", "EMBEDDING_PROVIDER", "LLM_BASE_URL", "EMBEDDING_BASE_URL"]
+            provider_keys = ["LLM_PROVIDER", "EMBEDDING_PROVIDER", "LLM_BASE_URL", "EMBEDDING_BASE_URL", "RERANKING_PROVIDER", "RERANKING_MODEL"]
             if key in provider_keys:
                 clear_provider_cache()
                 logfire.info(f"Provider cache cleared due to {key} update")
