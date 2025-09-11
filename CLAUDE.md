@@ -250,6 +250,92 @@ curl -X PUT http://localhost:8181/api/credentials/LLM_BASE_URL \
   -d '{"value": "https://api.openai.com/v1", "is_encrypted": false, "category": "rag_strategy"}'
 ```
 
+## RAG System Configuration
+
+The RAG (Retrieval-Augmented Generation) system integrates multiple AI services for knowledge-based responses.
+
+### RAG Agent Architecture
+
+**Services Integration**:
+- **Agents Service (port 8052)**: PydanticAI-based RAG agent
+- **Main Server (port 8181)**: OpenAI Free wrapper and credential management
+- **Ollama Service**: Local embedding generation with Qwen models
+- **Supabase**: Vector storage with pgvector extension
+
+### Key Configuration Points
+
+**RAG Agent Model Configuration**:
+```bash
+# Set via credentials API or environment
+RAG_AGENT_MODEL=openai:gpt-5-mini  # PydanticAI format: provider:model
+```
+
+**Critical Environment Variables** (docker-compose.yml):
+```yaml
+archon-agents:
+  environment:
+    - ARCHON_SERVER_PORT=8181  # Required for credential fetching
+```
+
+### Streaming vs Non-Streaming Mode
+
+**Organization Verification Issue**: OpenAI requires organization verification for streaming access to premium models (gpt-5-mini, gpt-4o, etc.).
+
+**Workaround**: Use non-streaming mode for RAG queries to avoid verification requirement while maintaining full functionality.
+
+**API Endpoints**:
+```bash
+# Non-streaming RAG query (recommended)
+POST http://localhost:8052/agents/run
+{
+  "agent_type": "rag",
+  "prompt": "Your question here",
+  "context": {
+    "source_filter": null,
+    "match_count": 3
+  }
+}
+
+# Streaming RAG query (requires organization verification)
+POST http://localhost:8052/agents/rag/stream
+```
+
+### OpenAI Free Wrapper Integration
+
+**Architecture**: PydanticAI agents must integrate with OpenAI Free wrapper for token tracking and fallback functionality.
+
+**Integration Pattern**:
+```python
+# In RAG agent initialization
+provider_config = await credential_service.get_active_provider("llm")
+if provider_config.get("provider") == "openai_free":
+    # Use OpenAI Free wrapper with token tracking
+    client = get_openai_free_client()
+    # Integrate with PydanticAI Agent
+```
+
+**Verification Commands**:
+```bash
+# Check RAG agent logs for correct integration
+docker compose logs archon-agents | grep -E "(openai_free|wrapper|fallback)"
+
+# Test RAG query end-to-end
+curl -X POST http://localhost:8052/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{"agent_type": "rag", "prompt": "test query", "context": {}}'
+```
+
+### Common RAG Issues
+
+1. **Direct OpenAI API Calls**: Agent bypassing wrapper, calling `https://api.openai.com/v1/chat/completions` directly
+   - **Fix**: Ensure proper OpenAI Free wrapper integration in agent initialization
+
+2. **Missing Credentials**: Agents service cannot fetch credentials from main server
+   - **Fix**: Add `ARCHON_SERVER_PORT=8181` to agents service environment
+
+3. **Browser RAG Search Limited**: Knowledge Base UI only searches titles, not content
+   - **Workaround**: Use direct API endpoints for full content search
+
 ## File Organization
 
 ### Frontend Structure

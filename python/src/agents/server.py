@@ -88,6 +88,15 @@ async def fetch_credentials_from_server():
                         os.environ[key] = str(value)
                         logger.info(f"Set credential: {key}")
 
+                # Special handling for OpenAI Free wrapper
+                llm_provider = credentials.get("LLM_PROVIDER")
+                if llm_provider == "openai_free":
+                    wrapper_base_url = f"http://archon-server:{server_port}/api/openai-free"
+                    os.environ["OPENAI_BASE_URL"] = wrapper_base_url
+                    os.environ["OPENAI_API_KEY"] = "wrapper-bypass-token"
+                    logger.info(f"🎯 OpenAI Free wrapper configured: {wrapper_base_url}")
+                    logger.info("✅ PydanticAI will use OpenAI Free wrapper for all agents")
+
                 # Store credentials globally for agent initialization
                 global AGENT_CREDENTIALS
                 AGENT_CREDENTIALS = credentials
@@ -105,6 +114,9 @@ async def fetch_credentials_from_server():
             else:
                 logger.error(f"Failed to fetch credentials after {max_retries} attempts")
                 raise Exception("Could not fetch credentials from server")
+
+
+
 
 
 # Lifespan context manager

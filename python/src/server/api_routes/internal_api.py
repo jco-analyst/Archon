@@ -72,6 +72,7 @@ async def get_agent_credentials(request: Request) -> dict[str, Any]:
 
     try:
         # Get credentials needed by agents
+                # Get credentials needed by agents
         credentials = {
             # OpenAI credentials
             "OPENAI_API_KEY": await credential_service.get_credential(
@@ -79,6 +80,10 @@ async def get_agent_credentials(request: Request) -> dict[str, Any]:
             ),
             "OPENAI_MODEL": await credential_service.get_credential(
                 "OPENAI_MODEL", default="gpt-4o-mini"
+            ),
+            # Provider configuration - CRITICAL for OpenAI Free wrapper detection
+            "LLM_PROVIDER": await credential_service.get_credential(
+                "LLM_PROVIDER", default="openai"
             ),
             # Model configurations
             "DOCUMENT_AGENT_MODEL": await credential_service.get_credential(

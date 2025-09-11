@@ -1,6 +1,6 @@
 # RAG System Deep Investigation
 
-**Date**: 2025-09-09
+**Date**: 2025-09-09 (Updated: 2025-09-10)  
 **Purpose**: Comprehensive verification that RAG system is calling correct models and functioning end-to-end
 **Project**: Archon RAG Debug (d7243341-474a-42ea-916e-4dda894dae95)
 **Description**: Debugging and testing RAG implementation, from the MCP add md tool, embedding, reranking, proper model usage, fallback
@@ -810,3 +810,203 @@ The transformation from **"completely broken"** to **"functional with next steps
 **Investigation Completed**: 2025-09-09 16:00 UTC  
 **Status**: ✅ SUCCESSFUL - Ready for OpenAI Free Wrapper Integration  
 **Handoff**: Complete context documented for seamless continuation
+
+---
+
+# 🔬 PHASE 2 INVESTIGATION UPDATE - 2025-09-10
+
+## Monkey-Patching Integration Issue Identified
+
+**Investigation Date**: 2025-09-10 19:00 UTC  
+**Focus**: OpenAI Free wrapper integration debugging  
+**Status**: Root cause identified, fix implementation pending
+
+### ✅ **VERIFIED WORKING COMPONENTS**:
+
+1. **Provider Detection System** ✅
+   - RAG agent correctly detects `openai_free` provider
+   - Credentials API returns proper values: `LLM_PROVIDER=openai_free`
+   - Agent logs: `"Provider detection: openai_free (from fetched credentials)"`
+
+2. **OpenAI Free Wrapper Endpoint** ✅
+   - Direct testing confirmed: `http://localhost:8181/api/openai-free/chat/completions`
+   - Returns proper OpenAI-compatible responses with token usage statistics
+   - Example response includes: `"total_tokens": 214` with detailed usage breakdown
+
+3. **RAG Agent Infrastructure** ✅
+   - Agent initializes successfully: `"Initialized rag agent with model: openai:gpt-5-mini"`
+   - Wrapper detection code path triggers correctly
+   - Logs show: `"🎯 OpenAI Free provider detected - using wrapper with token tracking"`
+
+### ❌ **CRITICAL ISSUE IDENTIFIED**:
+
+**Problem**: Monkey-patching implementation in `_run_with_openai_free_wrapper()` is ineffective
+
+**Evidence from Logs**:
+```
+INFO:src.agents.rag_agent:✅ OpenAI Free wrapper client initialized (remote)
+INFO:src.agents.rag_agent:🔄 Executing RAG agent with OpenAI Free wrapper
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         ^ This should be wrapper calls, not direct OpenAI
+```
+
+**Root Cause**: PydanticAI bypasses the monkey-patched `openai.AsyncOpenAI` class and makes direct API calls.
+
+### 🔧 **TECHNICAL ANALYSIS**:
+
+**Current Monkey-Patch Implementation** (`rag_agent.py:143-168`):
+```python
+original_async_openai = openai.AsyncOpenAI
+
+class WrappedAsyncOpenAI:
+    def __init__(self, *args, **kwargs):
+        self._remote_client = RemoteOpenAIFreeClient()
+
+openai.AsyncOpenAI = WrappedAsyncOpenAI
+```
+
+**Issues Identified**:
+1. **Timing Problem**: PydanticAI may instantiate OpenAI client before monkey-patch
+2. **Scope Problem**: Monkey-patch may not affect the import scope used by PydanticAI
+3. **Implementation Gap**: Incomplete OpenAI client API compatibility in wrapper
+
+### 🎯 **EFFICIENT TESTING WORKFLOW ESTABLISHED**:
+
+**Primary Test Command**:
+```bash
+curl -X POST http://localhost:8052/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{"agent_type": "rag", "prompt": "test", "context": {}}'
+```
+
+**Real-time Monitoring**:
+```bash
+docker compose logs Archon-Agents --tail=0 --follow | grep -E "(openai|wrapper|POST https://api.openai.com)"
+```
+
+**Success Indicators** (Target):
+```
+INFO:httpx:HTTP Request: POST http://archon-server:8181/api/openai-free/chat/completions
+INFO:src.agents.rag_agent:Token usage tracked: XXX tokens used
+```
+
+**Problem Indicators** (Current):
+```
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         ^ Direct OpenAI calls (should be wrapper calls)
+```
+
+### 📋 **NEXT IMPLEMENTATION STRATEGIES**:
+
+1. **Pre-Agent Monkey-Patching**: Apply patch during agent `__init__` before PydanticAI initialization
+2. **Environment Variable Override**: Set `OPENAI_BASE_URL` to point to wrapper endpoint
+3. **PydanticAI Client Override**: Pass custom client to Agent constructor if supported
+4. **HTTP Request Interception**: Lower-level HTTP interception of OpenAI API calls
+
+### 🚀 **IMMEDIATE ACTION PLAN**:
+
+**Priority 1**: Fix monkey-patching implementation in `rag_agent.py`  
+**Priority 2**: Verify logs show wrapper calls instead of direct OpenAI calls  
+**Priority 3**: Test token tracking and daily limit enforcement  
+**Priority 4**: Validate fallback provider activation
+
+### 📊 **CURRENT SYSTEM STATE**:
+
+- **Services**: All healthy (Archon-Server, Archon-Agents, Archon-MCP, Archon-UI)
+- **Core RAG**: Functional for basic queries
+- **Provider Detection**: Working correctly  
+- **Wrapper Endpoint**: Fully functional
+- **Integration Gap**: Monkey-patching bypass issue
+
+**Investigation Status**: Root cause identified, implementation fix required  
+**Testing Infrastructure**: Established and documented  
+**Next Phase**: Fix monkey-patching implementation for complete integration
+
+---
+
+# 🎯 PHASE 3 SOLUTION IMPLEMENTATION - 2025-09-10
+
+## Base URL Override Solution Selected
+
+**Implementation Date**: 2025-09-10 19:30 UTC  
+**Approach**: Environment Variable Override at Startup  
+**Status**: Implementation in progress
+
+### 🏆 **SOLUTION ANALYSIS COMPLETED**:
+
+**Three approaches were evaluated:**
+
+1. **❌ Agent Recreation**: High overhead, complex lifecycle management
+2. **✅ Base URL Override**: Selected - Low overhead, framework compatible
+3. **❌ Client Injection**: PydanticAI compatibility uncertain
+
+**Selected Solution**: **Base URL Override** - Most effective approach
+
+### 🔧 **IMPLEMENTATION STRATEGY**:
+
+**Core Principle**: Configure OpenAI client environment at startup, not runtime
+
+**Modification Location**: `python/src/agents/server.py` - `fetch_credentials_from_server()` function
+
+**Implementation**:
+```python
+# Special handling for OpenAI Free wrapper in credential fetching
+if credentials.get("LLM_PROVIDER") == "openai_free":
+    wrapper_base_url = f"http://archon-server:{server_port}/api/openai-free"
+    os.environ["OPENAI_BASE_URL"] = wrapper_base_url
+    os.environ["OPENAI_API_KEY"] = "wrapper-bypass-token"
+    logger.info(f"🎯 OpenAI Free wrapper configured: {wrapper_base_url}")
+    logger.info("✅ PydanticAI will use OpenAI Free wrapper for all agents")
+```
+
+**Benefits**:
+- ✅ **Zero Runtime Overhead**: Environment set once at startup
+- ✅ **Framework Native**: PydanticAI respects `OPENAI_BASE_URL` naturally  
+- ✅ **System Integration**: Uses existing credential fetching infrastructure
+- ✅ **Minimal Changes**: Single function modification
+
+### 🧪 **VERIFICATION PLAN**:
+
+**Success Criteria**:
+```bash
+# After implementation, logs should show:
+INFO:src.agents.server:🎯 OpenAI Free wrapper configured: http://archon-server:8181/api/openai-free
+INFO:src.agents.server:✅ PydanticAI will use OpenAI Free wrapper for all agents
+
+# RAG agent calls should show:
+INFO:httpx:HTTP Request: POST http://archon-server:8181/api/openai-free/chat/completions
+# Instead of:
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions
+```
+
+**Testing Command**:
+```bash
+curl -X POST http://localhost:8052/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{"agent_type": "rag", "prompt": "test", "context": {}}'
+```
+
+### 📋 **CURRENT IMPLEMENTATION STATUS**:
+
+**✅ Completed**:
+- Modified `fetch_credentials_from_server()` in `python/src/agents/server.py`
+- Added OpenAI Free wrapper environment configuration
+- Enhanced logging for verification
+
+**🔄 Next Steps**:
+1. Restart agents service to apply changes
+2. Test RAG agent with updated configuration  
+3. Verify logs show wrapper calls instead of direct OpenAI calls
+4. Update task status in Archon system
+
+### 🎯 **EXPECTED OUTCOME**:
+
+After implementation:
+- **All PydanticAI agents** will automatically use OpenAI Free wrapper when `LLM_PROVIDER=openai_free`
+- **Token tracking** will be active for all RAG queries
+- **Daily limits** will be enforced with fallback activation
+- **No performance impact** - configuration happens once at startup
+
+This solution leverages the framework's natural configuration mechanism rather than fighting against it.

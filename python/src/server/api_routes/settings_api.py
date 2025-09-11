@@ -594,6 +594,43 @@ async def cleanup_old_usage_records(days_to_keep: int = 30):
         logfire.error(f"Error cleaning up usage records | error={str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
+
+@router.post("/openai-free/chat/completions")
+@router.post("/openai-free/chat/completions")
+async def openai_free_chat_completions(request: dict):
+    """
+    Proxy endpoint for OpenAI chat completions using OpenAI Free wrapper.
+    This allows agents service to use OpenAI Free wrapper via HTTP API.
+    """
+    try:
+        logfire.info(f"OpenAI Free chat completions request | model={request.get('model')}")
+        
+        # Import here to avoid circular imports  
+        from ..services.openai_free_wrapper import get_openai_free_client
+        
+        async with get_openai_free_client() as client:
+            # Call the wrapper's chat completion method
+            response = await client.chat.completions.create(**request)
+            
+            # Convert response to dict if needed
+            if hasattr(response, 'model_dump'):
+                response_dict = response.model_dump()
+            elif hasattr(response, 'dict'):
+                response_dict = response.dict()
+            else:
+                response_dict = response
+                
+            logfire.info(f"OpenAI Free chat completion success | tokens={response_dict.get('usage', {}).get('total_tokens', 'unknown')}")
+            return response_dict
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Error in OpenAI Free chat completions | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+        logfire.error(f"Error cleaning up usage records | error={str(e)}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
     except Exception as e:
         logfire.error(f"Error getting database metrics | error={str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
