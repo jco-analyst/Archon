@@ -28,7 +28,7 @@ from .agentic_rag_strategy import AgenticRAGStrategy
 # Import all strategies
 from .base_search_strategy import BaseSearchStrategy
 from .hybrid_search_strategy import HybridSearchStrategy
-from .reranking_strategy import RerankingStrategy
+from .reranking_strategy import create_reranking_strategy
 
 logger = get_logger(__name__)
 
@@ -52,16 +52,19 @@ class RAGService:
         self.hybrid_strategy = HybridSearchStrategy(self.supabase_client, self.base_strategy)
         self.agentic_strategy = AgenticRAGStrategy(self.supabase_client, self.base_strategy)
 
-        # Initialize reranking strategy based on settings
+        # Initialize reranking strategy using credential service
         self.reranking_strategy = None
-        use_reranking = self.get_bool_setting("USE_RERANKING", False)
-        if use_reranking:
-            try:
-                self.reranking_strategy = RerankingStrategy()
-                logger.info("Reranking strategy loaded successfully")
-            except Exception as e:
-                logger.warning(f"Failed to load reranking strategy: {e}")
-                self.reranking_strategy = None
+        try:
+            from ..credential_service import credential_service
+            self.reranking_strategy = create_reranking_strategy(credential_service)
+            if self.reranking_strategy:
+                logger.info("Reranking strategy loaded successfully with credential service")
+            else:
+                logger.info("Reranking disabled via credentials or not available")
+        except Exception as e:
+            logger.warning(f"Failed to load reranking strategy: {e}")
+            self.reranking_strategy = None
+
 
     def get_setting(self, key: str, default: str = "false") -> str:
         """Get a setting from the credential service or fall back to environment variable."""
