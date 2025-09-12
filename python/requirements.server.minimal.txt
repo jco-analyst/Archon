@@ -1,0 +1,45 @@
+# Minimal Server Dependencies - ML packages hosted externally
+# Web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.20
+watchfiles>=0.18
+
+# Web crawling
+crawl4ai==0.7.4
+
+# Real-time communication
+python-socketio[asyncio]>=5.11.0
+
+# Database and storage
+supabase==2.15.1
+asyncpg>=0.29.0
+
+# Document processing (non-ML)
+pypdf2>=3.0.1
+pdfplumber>=0.11.6
+python-docx>=1.1.2
+markdown>=3.8
+
+# Security and utilities
+python-jose[cryptography]>=3.3.0
+cryptography>=41.0.0
+slowapi>=0.1.9
+
+# Core utilities
+httpx>=0.24.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+docker>=6.1.0
+psutil>=5.9.0
+
+# Logging
+logfire>=0.30.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.12.0
+
+# NOTE: ML packages (openai, sentence-transformers, torch, transformers) 
+# are hosted externally and mounted via volume at /root/.local

@@ -496,6 +496,45 @@ class CredentialService:
             logger.error(f"Error setting active provider {provider} for {service_type}: {e}")
             return False
 
+    async def get_setting(self, key: str, default: str = "") -> str:
+        """Get a setting from the credential service or fall back to environment variable."""
+        try:
+            # Try to get from credentials first
+            value = await self.get_credential(key)
+            if value is not None:
+                return str(value)
+        except Exception as e:
+            logger.error(f"Error getting credential {key}: {e}")
+        
+        # Fall back to environment variable
+        return os.getenv(key, default)
+
+    def get_bool_setting(self, key: str, default: bool = False) -> bool:
+        """Get a boolean setting from credential service synchronously."""
+        try:
+            # For synchronous bool settings, check cache first, then environment
+            if self._cache_initialized and key in self._cache:
+                value = self._cache[key]
+                if isinstance(value, dict) and value.get("is_encrypted"):
+                    # Can't decrypt synchronously, fall back to env
+                    value = os.getenv(key, "false" if not default else "true")
+                else:
+                    value = str(value) if value is not None else ""
+            else:
+                value = os.getenv(key, "false" if not default else "true")
+            
+            return str(value).lower() in ("true", "1", "yes", "on")
+        except Exception as e:
+            logger.error(f"Error getting bool setting {key}: {e}")
+            return default
+            return str(value).lower() in ("true", "1", "yes", "on")
+        except Exception as e:
+            logger.error(f"Error getting bool setting {key}: {e}")
+            return default
+        except Exception as e:
+            logger.error(f"Error setting active provider {provider} for {service_type}: {e}")
+            return False
+
 
 # Global instance
 credential_service = CredentialService()

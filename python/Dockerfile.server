@@ -1,25 +1,11 @@
 # Server Service - Web crawling and document processing microservice
 
-# Build stage
-FROM python:3.11 AS builder
-
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy and install Python dependencies
-COPY requirements.server.txt .
-RUN pip install --user --no-cache-dir -r requirements.server.txt
-
-# Runtime stage
+# Slim production build - ML environment hosted externally
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies for Playwright (minimal set)
+# Install minimal runtime dependencies (basic system packages only)
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -45,15 +31,16 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
+# Install only non-ML dependencies directly in image
+COPY requirements.server.minimal.txt .
+RUN pip install --no-cache-dir -r requirements.server.minimal.txt
 
-# Install Playwright browsers
+# Install Playwright browsers (but not via external Python packages)
+RUN pip install playwright && playwright install chromium
+
+# ML environment will be mounted at /root/.local from host storage
+# Models will be mounted at /root/.cache/huggingface from host storage
 ENV PATH=/root/.local/bin:$PATH
-RUN playwright install chromium
-
-# Pre-download the reranking model to avoid startup delays
-RUN python -c "from sentence_transformers import CrossEncoder; print('Downloading Qwen3-Reranker-4B...'); CrossEncoder('Qwen/Qwen3-Reranker-4B'); print('Model download complete!')"
 
 # Copy server code and tests
 COPY src/server/ src/server/
