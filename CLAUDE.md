@@ -138,6 +138,26 @@ docker-compose logs -f             # View logs
 docker-compose restart              # Restart services
 ```
 
+### Docker Development Workflow
+
+**CRITICAL: Python import caching requires container rebuilds after code changes.**
+
+```bash
+# After Python code changes (new functions, imports, modifications)
+docker compose down && docker compose up --build -d
+
+# After minor changes or config updates
+docker compose restart archon-server
+
+# Debug: Clear cache if rebuild fails
+docker exec Archon-Server find /app -name "__pycache__" -type d -exec rm -rf {} +
+
+# Debug: Verify code changes applied
+docker exec Archon-Server python -c "
+from your.module import your_function; print('✅ Import successful')
+"
+```
+
 ### Testing
 
 ```bash

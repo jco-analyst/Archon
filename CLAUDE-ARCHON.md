@@ -14,6 +14,16 @@
   3. Traditional tools (grep, sed) are FALLBACK ONLY
   4. This applies to ALL agents and subagents
 
+# AUTOMATIC PHASE CONTEXT LOADING
+  When executing /archon:archon command:
+  1. ALWAYS perform Archon MCP health check and project detection (as normal)
+  2. IMMEDIATELY after project detection, search for phase documentation:
+     - Use Glob tool to find: docs/*/PHASE*_IN_PROGRESS.md
+     - If ANY file with "IN_PROGRESS" in name is found: Read it AUTOMATICALLY
+     - Provide integrated context from BOTH this file AND the phase documentation
+  3. This ensures seamless context continuity across multiple sessions
+  4. Phase documentation contains critical session history and current state
+
 # Archon Integration & Workflow
 
 **CRITICAL: This project uses Archon MCP server for knowledge management, task tracking, and project organization. ALWAYS start with Archon MCP server task management.**

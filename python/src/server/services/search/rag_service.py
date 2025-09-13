@@ -249,7 +249,7 @@ class RAGService:
                         domain = detect_query_domain(query, [r.get("content", "") for r in formatted_results[:5]])
                         
                         formatted_results = await self.reranking_strategy.rerank_results(
-                            query, formatted_results, content_key="content", domain=domain
+                            query, formatted_results, content_key="content"
                         )
                         reranking_applied = True
                         logger.debug(f"Reranking applied to {len(formatted_results)} results")
