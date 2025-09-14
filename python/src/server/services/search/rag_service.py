@@ -52,11 +52,18 @@ class RAGService:
         self.hybrid_strategy = HybridSearchStrategy(self.supabase_client, self.base_strategy)
         self.agentic_strategy = AgenticRAGStrategy(self.supabase_client, self.base_strategy)
 
-        # Initialize reranking strategy using credential service
+        # Initialize reranking strategy placeholder (will be loaded async)
         self.reranking_strategy = None
+        self._reranking_initialized = False
+
+    async def _ensure_reranking_initialized(self):
+        """Ensure reranking strategy is initialized (async)."""
+        if self._reranking_initialized:
+            return
+            
         try:
             from ..credential_service import credential_service
-            self.reranking_strategy = create_reranking_strategy(credential_service)
+            self.reranking_strategy = await create_reranking_strategy(credential_service)
             if self.reranking_strategy:
                 logger.info("Reranking strategy loaded successfully with credential service")
             else:
@@ -64,6 +71,10 @@ class RAGService:
         except Exception as e:
             logger.warning(f"Failed to load reranking strategy: {e}")
             self.reranking_strategy = None
+        
+        self._reranking_initialized = True
+
+
 
 
     def get_setting(self, key: str, default: str = "false") -> str:
@@ -239,11 +250,18 @@ class RAGService:
                         continue
 
                 # Step 3: Apply reranking if we have a strategy or if enabled
+                # Step 3: Apply reranking if we have a strategy or if enabled
                 reranking_applied = False
+                await self._ensure_reranking_initialized()
+                
                 if self.reranking_strategy and formatted_results:
                     try:
                         # Import domain detection function
-                        from .qwen3_reranker import detect_query_domain
+                        # Import domain detection function based on provider
+                        if getattr(self.reranking_strategy, 'provider', '') == 'ollama':
+                            from .ollama_reranker import detect_query_domain
+                        else:
+                            from .qwen3_reranker import detect_query_domain
                         
                         # Auto-detect domain for dynamic instructions
                         domain = detect_query_domain(query, [r.get("content", "") for r in formatted_results[:5]])
@@ -348,11 +366,13 @@ class RAGService:
                     )
 
                 # Apply reranking if we have a strategy
+                await self._ensure_reranking_initialized()
+                
                 if self.reranking_strategy and results:
                     try:
                         # Code search is inherently 'code' domain for better instructions
                         results = await self.reranking_strategy.rerank_results(
-                            query, results, content_key="content", domain="code"
+                            query, results, content_key="content"
                         )
                     except Exception as e:
                         logger.warning(f"Code reranking failed: {e}")
