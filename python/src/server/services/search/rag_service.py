@@ -256,14 +256,15 @@ class RAGService:
                 
                 if self.reranking_strategy and formatted_results:
                     try:
-                        # Import domain detection function
-                        # Import domain detection function based on provider
-                        if getattr(self.reranking_strategy, 'provider', '') == 'ollama':
+                        # Import domain detection function based on provider/model type
+                        model_type = type(self.reranking_strategy.model).__name__ if self.reranking_strategy.model else 'unknown'
+                        
+                        if 'OllamaChatReranker' in model_type:
+                            from .ollama_chat_reranker import detect_query_domain
+                        elif getattr(self.reranking_strategy, 'provider', '') == 'ollama':
                             from .ollama_reranker import detect_query_domain
                         else:
                             from .qwen3_reranker import detect_query_domain
-                        
-                        # Auto-detect domain for dynamic instructions
                         domain = detect_query_domain(query, [r.get("content", "") for r in formatted_results[:5]])
                         
                         formatted_results = await self.reranking_strategy.rerank_results(

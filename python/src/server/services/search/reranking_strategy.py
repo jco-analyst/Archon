@@ -28,9 +28,11 @@ except ImportError:
 
 try:
     from .ollama_reranker import OllamaReranker
+    from .ollama_chat_reranker import OllamaChatReranker
     OLLAMA_AVAILABLE = True
 except ImportError:
     OllamaReranker = None
+    OllamaChatReranker = None
     OLLAMA_AVAILABLE = False
 
 from ...config.logfire_config import get_logger, safe_span
@@ -108,7 +110,7 @@ class RerankingStrategy:
             logger.error(f"Failed to create reranking strategy from credentials: {e}")
             return None
 
-    def _load_model(self) -> Optional[Union[Qwen3Reranker, Qwen3GGUFReranker, OllamaReranker]]:
+    def _load_model(self) -> Optional[Union[Qwen3Reranker, Qwen3GGUFReranker, OllamaChatReranker]]:
         """Load the reranker model based on provider configuration."""
         if not self.credential_service:
             logger.error("Credential service required for model loading")
@@ -127,23 +129,26 @@ class RerankingStrategy:
             logger.error(f"Failed to load {self.provider} reranking model: {e}")
             return None
 
-    def _load_ollama_model(self) -> Optional[OllamaReranker]:
-        """Load Ollama reranker model."""
+
+    def _load_ollama_model(self) -> Optional[OllamaChatReranker]:
+        """Load Ollama chat template reranker model (Phase 5 breakthrough implementation)."""
         if not OLLAMA_AVAILABLE:
-            logger.error("Ollama reranker not available - missing ollama_reranker module")
+            logger.error("Ollama chat reranker not available - missing ollama_chat_reranker module")
             return None
         
-        logger.info(f"Loading Ollama reranking model: {self.model_name}")
+        logger.info(f"Loading Ollama chat template reranking model: {self.model_name}")
         
         # Get Ollama configuration
-        base_url = self.credential_service.get_setting_sync("OLLAMA_BASE_URL", "http://localhost:11434")
+        base_url = self.credential_service.get_setting_sync("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
         
-        return OllamaReranker(
+        return OllamaChatReranker(
             model_name=self.model_name,
             base_url=base_url,
             timeout=30.0,
             max_retries=2
         )
+
+
 
     def _load_huggingface_model(self) -> Optional[Union[Qwen3Reranker, Qwen3GGUFReranker]]:
         """Load HuggingFace reranker model (original implementation)."""

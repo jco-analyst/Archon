@@ -1,7 +1,16 @@
 # Phase 5 Context Window 5: REAL ROOT CAUSE BREAKTHROUGH
 
-**Date**: 2025-09-14T10:20:00Z → **UPDATED**: 2025-09-14T11:15:00Z
+**Date**: 2025-09-14T10:20:00Z → **UPDATED**: 2025-09-14T12:15:00Z
 **Objective**: Resolve critical timeout issues and enable functional reranking
+
+## 🔄 **SESSION UPDATE - 2025-09-14T12:15:00Z**
+
+### Additional Context from Latest Session
+- **F16 Model Implementation**: Successfully created optimized `qwen3-reranker-optimized` with proper context settings
+- **Dual Ollama Process Issue**: Discovered multiple Ollama processes causing model registry conflicts
+- **Docker Networking Still Problematic**: Container still connects to old process despite local fixes
+- **Model Quality Verified**: F16 responds with proper "yes"/"no" vs Q8_0 "33333" degradation
+- **Process Management**: Background Ollama serving working with `nohup ollama serve &`
 
 ---
 
@@ -177,4 +186,20 @@ All major infrastructure objectives achieved with production-ready graceful degr
 3. **Mark Phase 5 complete**: All major objectives achieved with real solution
 4. **Document lessons learned**: Format issues vs networking assumptions
 
-**🎯 BREAKTHROUGH ACHIEVED**: The timeout issue was API format incompatibility, not networking. With proper Qwen3-Reranker format, reranking should now function correctly.
+### Current Session Status (2025-09-14T12:15:00Z)
+**✅ MODELS AVAILABLE LOCALLY**: Both F16 and optimized versions working
+**❌ DOCKER CONTAINER ISOLATION**: Container still sees old Ollama process registry
+**🔧 SOLUTION IDENTIFIED**: Multiple Ollama processes causing registry confusion
+**⚡ QUALITY IMPROVEMENT**: F16 provides "yes"/"no" vs Q8_0 "33333" quantization artifacts
+
+### Docker Container Issue Resolution Needed
+```bash
+# Problem: Container connects to different Ollama process than local API
+# Evidence: Local API shows F16 models, container API shows only Q8_0
+# Impact: reranking_applied=false despite model availability
+
+# Current workaround: Use Q8_0 with fallback scoring
+# Ideal solution: Fix container networking to see correct Ollama process
+```
+
+**🎯 BREAKTHROUGH ACHIEVED**: The timeout issue was API format incompatibility, not networking. With proper Qwen3-Reranker format, reranking should now function correctly. Additional breakthrough: F16 model provides significantly better quality than quantized versions.
