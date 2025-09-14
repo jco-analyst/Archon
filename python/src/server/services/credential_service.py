@@ -509,6 +509,26 @@ class CredentialService:
         # Fall back to environment variable
         return os.getenv(key, default)
 
+    def get_setting_sync(self, key: str, default: str = "") -> str:
+        """Get a setting synchronously from cache or environment variable."""
+        try:
+            # Check cache first if initialized
+            if self._cache_initialized and key in self._cache:
+                value = self._cache[key]
+                if isinstance(value, dict) and value.get("is_encrypted"):
+                    # Can't decrypt synchronously, fall back to env
+                    return os.getenv(key, default)
+                else:
+                    return str(value) if value is not None else default
+            else:
+                # Fall back to environment variable
+                return os.getenv(key, default)
+        except Exception as e:
+            logger.error(f"Error getting sync setting {key}: {e}")
+            return os.getenv(key, default)
+
+
+
     def get_bool_setting(self, key: str, default: bool = False) -> bool:
         """Get a boolean setting from credential service synchronously."""
         try:

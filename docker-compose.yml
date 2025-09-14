@@ -31,6 +31,7 @@ services:
       - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
       - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - USE_RERANKING=true
     networks:
       - app-network
     volumes:

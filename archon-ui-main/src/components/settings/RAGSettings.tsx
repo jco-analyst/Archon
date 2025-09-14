@@ -503,8 +503,8 @@ export const RAGSettings = ({
                 };
                 // Auto-populate reranking settings when enabled
                 if (e.target.checked) {
-                  newSettings.RERANKING_PROVIDER = 'huggingface';
-                  newSettings.RERANKING_MODEL = 'Qwen/Qwen3-Reranker-0.6B';
+                  newSettings.RERANKING_PROVIDER = 'ollama';
+                  newSettings.RERANKING_MODEL = 'dengcao/Qwen3-Reranker-0.6B:Q8_0';
                 }
                 setRagSettings(newSettings);
               }} 
@@ -522,28 +522,32 @@ export const RAGSettings = ({
               <div>
                 <Select
                   label="Reranking Provider"
-                  value={ragSettings.RERANKING_PROVIDER || 'huggingface'}
+                  value={ragSettings.RERANKING_PROVIDER || 'ollama'}
                   onChange={e => handleRerankingProviderChange(e.target.value, ragSettings, setRagSettings)}
                   accentColor="purple"
                   options={[
+                    { value: 'ollama', label: 'Ollama' },
                     { value: 'huggingface', label: 'HuggingFace' },
                   ]}
-                  disabled={true}
                 />
               </div>
               <div>
                 <Select
                   label="Reranking Model"
-                  value={ragSettings.RERANKING_MODEL || 'Qwen/Qwen3-Reranker-0.6B'}
+                  value={ragSettings.RERANKING_MODEL || (ragSettings.RERANKING_PROVIDER === 'ollama' ? 'dengcao/Qwen3-Reranker-0.6B:Q8_0' : 'Qwen/Qwen3-Reranker-0.6B')}
                   onChange={e => setRagSettings({
                     ...ragSettings,
                     RERANKING_MODEL: e.target.value
                   })}
                   accentColor="purple"
-                  options={[
-                    { value: 'Qwen/Qwen3-Reranker-0.6B', label: 'Qwen3-Reranker-0.6B (Recommended)' },
-                    { value: 'Qwen/Qwen3-Reranker-4B', label: 'Qwen3-Reranker-4B (High VRAM)' },
-                  ]}
+                  options={
+                    ragSettings.RERANKING_PROVIDER === 'ollama' ? [
+                      { value: 'dengcao/Qwen3-Reranker-0.6B:Q8_0', label: 'Qwen3-Reranker-0.6B Q8_0 (Recommended)' },
+                    ] : [
+                      { value: 'Qwen/Qwen3-Reranker-0.6B', label: 'Qwen3-Reranker-0.6B (Recommended)' },
+                      { value: 'Qwen/Qwen3-Reranker-4B', label: 'Qwen3-Reranker-4B (High VRAM)' },
+                    ]
+                  }
                 />
               </div>
               <div>
@@ -881,14 +885,15 @@ function handleRerankingProviderChange(provider: string, ragSettings: any, setRa
     RERANKING_MODEL: getDefaultRerankingModel(provider)
   });
 }
-
 // Helper to get default reranking models
 function getDefaultRerankingModel(provider: string): string {
   switch (provider) {
+    case 'ollama':
+      return 'dengcao/Qwen3-Reranker-0.6B:Q8_0'; // Available in Ollama
     case 'huggingface':
       return 'Qwen/Qwen3-Reranker-0.6B'; // Recommended for GTX 1080 Ti
     default:
-      return 'Qwen/Qwen3-Reranker-0.6B';
+      return 'dengcao/Qwen3-Reranker-0.6B:Q8_0'; // Default to Ollama
   }
 }
 

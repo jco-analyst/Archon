@@ -85,7 +85,15 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
             else:
                 logger.debug("Using cached rag_strategy settings")
 
-            base_url = credential_service._get_provider_base_url(provider, rag_settings)
+            # Get base URL - use embedding-specific URL if requested
+            if use_embedding_provider:
+                embedding_base_url = rag_settings.get("EMBEDDING_BASE_URL")
+                fallback_base_url = credential_service._get_provider_base_url(provider, rag_settings)
+                base_url = embedding_base_url or fallback_base_url
+                logger.debug(f"DEBUG: use_embedding_provider=True, embedding_base_url={embedding_base_url}, fallback={fallback_base_url}, final={base_url}")
+            else:
+                base_url = credential_service._get_provider_base_url(provider, rag_settings)
+                logger.debug(f"DEBUG: use_embedding_provider=False, base_url={base_url}")
         else:
             # Get configured provider from database
             service_type = "embedding" if use_embedding_provider else "llm"
@@ -104,7 +112,16 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
             api_key = provider_config["api_key"]
             base_url = provider_config["base_url"]
 
-        logger.info(f"Creating LLM client for provider: {provider_name}")
+        # CRITICAL ARCHITECTURAL FIX: Never use OpenAI Free wrapper for embedding operations
+        if use_embedding_provider and provider_name == "openai_free":
+            logger.warning("🚨 EMBEDDING PROVIDER MISCONFIGURATION: Embedding operations should not use openai_free wrapper")
+            logger.warning("🔧 Please set EMBEDDING_PROVIDER to 'ollama' or 'openai' (not openai_free) via Settings UI")
+            # Force fallback to regular OpenAI for embeddings to avoid wrapper interference
+            provider_name = "openai"
+            logger.info("⚡ FALLBACK: Using direct OpenAI for embedding operations")
+
+        logger.info(f"Creating LLM client for provider: {provider_name} (embedding_mode={use_embedding_provider})")
+        logger.debug(f"DEBUG: Final base_url before client creation: {base_url}")
 
         if provider_name == "openai":
             if not api_key:
@@ -114,6 +131,10 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
             logger.info("OpenAI client created successfully")
 
         elif provider_name == "openai_free":
+            # ARCHITECTURAL SAFETY: This branch should never execute for embedding operations
+            if use_embedding_provider:
+                raise ValueError("🚨 ARCHITECTURAL ERROR: Embedding operations routed to OpenAI Free wrapper - this should never happen after the fix above")
+                
             if not api_key:
                 raise ValueError("OpenAI API key not found")
 
@@ -180,6 +201,9 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
 
 
 
+
+
+
 async def get_embedding_model(provider: str | None = None) -> str:
     """
     Get the configured embedding model based on the provider.
@@ -216,7 +240,7 @@ async def get_embedding_model(provider: str | None = None) -> str:
         if custom_model:
             # Map friendly names to actual model names for Ollama
             if provider_name == "ollama" and custom_model == "qwen3-embedding-4b:q5_k_m":
-                return "hf.co/Qwen/Qwen3-Embedding-4B-GGUF:Q5_K_M"
+                return "dengcao/Qwen3-Embedding-4B:Q5_K_M"
             return custom_model
 
         # Return provider-specific defaults
@@ -224,7 +248,7 @@ async def get_embedding_model(provider: str | None = None) -> str:
             return "text-embedding-3-small"
         elif provider_name == "ollama":
             # Ollama default embedding model - use actual model ID from Ollama
-            return "hf.co/Qwen/Qwen3-Embedding-4B-GGUF:Q5_K_M"
+            return "dengcao/Qwen3-Embedding-4B:Q5_K_M"
         elif provider_name == "google":
             # Google's embedding model
             return "text-embedding-004"
@@ -236,4 +260,5 @@ async def get_embedding_model(provider: str | None = None) -> str:
         logger.error(f"Error getting embedding model: {e}")
         # Fallback to OpenAI default
         return "text-embedding-3-small"
+
 
