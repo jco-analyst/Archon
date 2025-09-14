@@ -28,29 +28,29 @@ DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
 class OllamaReranker:
     """
-    Ollama-based reranking service using Qwen3-Reranker model via chat completion API.
+    Ollama-based reranking service using embeddings similarity approach.
     
-    Uses prompt engineering to get relevance scores from the reranking model,
-    bypassing PyTorch CUDA compatibility limitations entirely.
+    Instead of using problematic text generation, uses embedding similarity 
+    which works reliably with Ollama infrastructure.
     """
     
     def __init__(
         self, 
-        model_name: str = DEFAULT_OLLAMA_MODEL,
+        embedding_model: str = "dengcao/Qwen3-Embedding-4B:Q5_K_M",
         base_url: str = DEFAULT_OLLAMA_BASE_URL,
         timeout: float = 30.0,
         max_retries: int = 2
     ):
         """
-        Initialize Ollama reranker.
+        Initialize Ollama reranker using embedding similarity.
         
         Args:
-            model_name: Ollama model name (e.g., "dengcao/Qwen3-Reranker-0.6B:Q8_0")
+            embedding_model: Ollama embedding model name
             base_url: Ollama API base URL
             timeout: Request timeout in seconds
             max_retries: Number of retry attempts for failed requests
         """
-        self.model_name = model_name
+        self.embedding_model = embedding_model
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
         self.max_retries = max_retries
@@ -59,7 +59,7 @@ class OllamaReranker:
         # Model availability cache
         self._model_available = None
         
-        logger.info(f"Initialized OllamaReranker with model: {model_name}")
+        logger.info(f"Initialized OllamaReranker with embedding model: {embedding_model}")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -69,35 +69,57 @@ class OllamaReranker:
         """Async context manager exit - cleanup client."""
         await self._client.aclose()
 
-    def _build_reranking_prompt(self, query: str, document: str) -> str:
+    async def _get_embedding(self, text: str) -> List[float]:
         """
-        Build a structured prompt for relevance scoring.
-        
-        The prompt is designed to extract numerical relevance scores from
-        the Qwen3-Reranker model using natural language instructions.
+        Get embedding vector from Ollama.
         
         Args:
-            query: Search query
-            document: Document content to evaluate against query
+            text: Text to embed
             
         Returns:
-            Formatted prompt for relevance scoring
+            List of float values representing the embedding
         """
-        return f"""You are a relevance scoring expert. Rate how well the document answers or relates to the query.
+        payload = {
+            "model": self.embedding_model,
+            "prompt": text
+        }
+        
+        response = await self._client.post(
+            f"{self.base_url}/api/embeddings",
+            json=payload
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        return result.get("embedding", [])
 
-Query: {query}
-
-Document: {document}
-
-Instructions:
-- Provide a relevance score from 0.0 to 1.0
-- 1.0 = Perfect match, directly answers the query
-- 0.8-0.9 = High relevance, mostly answers the query  
-- 0.6-0.7 = Moderate relevance, partially related
-- 0.4-0.5 = Low relevance, tangentially related
-- 0.0-0.3 = No relevance, unrelated content
-
-Respond with just the numerical score (e.g., 0.85):"""
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Calculate cosine similarity between two vectors.
+        
+        Args:
+            vec1: First vector
+            vec2: Second vector
+            
+        Returns:
+            Cosine similarity score between -1 and 1
+        """
+        import math
+        
+        if not vec1 or not vec2:
+            return 0.0
+            
+        # Calculate dot product
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        
+        # Calculate magnitudes
+        magnitude1 = math.sqrt(sum(a * a for a in vec1))
+        magnitude2 = math.sqrt(sum(a * a for a in vec2))
+        
+        if magnitude1 == 0 or magnitude2 == 0:
+            return 0.0
+            
+        return dot_product / (magnitude1 * magnitude2)
 
     async def _get_relevance_score(
         self, 
@@ -106,7 +128,7 @@ Respond with just the numerical score (e.g., 0.85):"""
         retry_count: int = 0
     ) -> float:
         """
-        Get relevance score for a single query-document pair.
+        Get relevance score using embedding similarity.
         
         Args:
             query: Search query
@@ -115,61 +137,32 @@ Respond with just the numerical score (e.g., 0.85):"""
             
         Returns:
             Relevance score between 0.0 and 1.0
-            
-        Raises:
-            Exception: If all retry attempts fail
         """
-        prompt = self._build_reranking_prompt(query, document)
-        
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.1,  # Low temperature for consistent scoring
-                "top_p": 0.9,
-                "stop": ["\n", "Explanation", "Reasoning"]
-            }
-        }
-        
         try:
-            response = await self._client.post(
-                f"{self.base_url}/api/generate",
-                json=payload
-            )
-            response.raise_for_status()
+            # Get embeddings for both query and document
+            query_embedding = await self._get_embedding(query)
+            doc_embedding = await self._get_embedding(document)
             
-            result = response.json()
-            score_text = result.get("response", "").strip()
+            # Calculate cosine similarity
+            similarity = self._cosine_similarity(query_embedding, doc_embedding)
             
-            # Extract numerical score from response
-            try:
-                score = float(score_text)
-                # Clamp score to valid range
-                return max(0.0, min(1.0, score))
-            except ValueError:
-                # Try to extract first number from response
-                import re
-                numbers = re.findall(r'0?\.\d+|[01]\.?\d*', score_text)
-                if numbers:
-                    score = float(numbers[0])
-                    return max(0.0, min(1.0, score))
-                else:
-                    logger.warning(f"Could not parse score from: {score_text}")
-                    return 0.0
-                    
+            # Convert similarity (-1 to 1) to relevance score (0 to 1)
+            relevance_score = (similarity + 1) / 2
+            
+            return max(0.0, min(1.0, relevance_score))
+            
         except Exception as e:
             if retry_count < self.max_retries:
-                logger.warning(f"Reranking request failed (attempt {retry_count + 1}): {e}")
-                await asyncio.sleep(0.5 * (retry_count + 1))  # Exponential backoff
+                logger.warning(f"Embedding similarity failed (attempt {retry_count + 1}): {e}")
+                await asyncio.sleep(0.5 * (retry_count + 1))
                 return await self._get_relevance_score(query, document, retry_count + 1)
             else:
-                logger.error(f"Reranking failed after {self.max_retries + 1} attempts: {e}")
-                raise
+                logger.error(f"Embedding similarity failed after {self.max_retries + 1} attempts: {e}")
+                return 0.0
 
     async def predict(self, query_doc_pairs: List[List[str]]) -> List[float]:
         """
-        Generate relevance scores for multiple query-document pairs.
+        Generate relevance scores using embedding similarity.
         
         Args:
             query_doc_pairs: List of [query, document] pairs
@@ -181,9 +174,9 @@ Respond with just the numerical score (e.g., 0.85):"""
             return []
             
         with safe_span(
-            "ollama_rerank_predict", 
+            "ollama_embedding_rerank", 
             pair_count=len(query_doc_pairs),
-            model_name=self.model_name
+            model_name=self.embedding_model
         ) as span:
             try:
                 # Process pairs concurrently for better performance
@@ -199,7 +192,7 @@ Respond with just the numerical score (e.g., 0.85):"""
                 for i, result in enumerate(scores):
                     if isinstance(result, Exception):
                         logger.error(f"Failed to score pair {i}: {result}")
-                        final_scores.append(0.0)  # Default score for failed requests
+                        final_scores.append(0.0)
                     else:
                         final_scores.append(result)
                 
@@ -207,18 +200,17 @@ Respond with just the numerical score (e.g., 0.85):"""
                 if final_scores:
                     span.set_attribute("score_range", f"{min(final_scores):.3f}-{max(final_scores):.3f}")
                 
-                logger.debug(f"Generated {len(final_scores)} reranking scores")
+                logger.info(f"Generated {len(final_scores)} embedding-based reranking scores")
                 return final_scores
                 
             except Exception as e:
-                logger.error(f"Error in batch reranking: {e}")
+                logger.error(f"Error in embedding-based reranking: {e}")
                 span.set_attribute("error", str(e))
-                # Return zero scores as fallback
                 return [0.0] * len(query_doc_pairs)
 
     async def is_available(self) -> bool:
         """
-        Check if the Ollama reranker model is available and accessible.
+        Check if the Ollama embedding model is available.
         
         Returns:
             True if model is available, False otherwise
@@ -227,79 +219,72 @@ Respond with just the numerical score (e.g., 0.85):"""
             return self._model_available
             
         try:
-            # Check if Ollama service is running
             response = await self._client.get(f"{self.base_url}/api/tags")
             response.raise_for_status()
             
             models = response.json().get("models", [])
             model_names = [model["name"] for model in models]
             
-            # Check if our specific model is available
-            self._model_available = self.model_name in model_names
+            self._model_available = self.embedding_model in model_names
             
             if not self._model_available:
-                logger.warning(f"Model {self.model_name} not found in Ollama. Available models: {model_names}")
+                logger.warning(f"Embedding model {self.embedding_model} not found. Available: {model_names}")
             else:
-                logger.info(f"Confirmed Ollama model availability: {self.model_name}")
+                logger.info(f"Confirmed Ollama embedding model availability: {self.embedding_model}")
                 
             return self._model_available
             
         except Exception as e:
-            logger.error(f"Failed to check Ollama model availability: {e}")
+            logger.error(f"Failed to check Ollama embedding model availability: {e}")
             self._model_available = False
             return False
 
     def get_model_info(self) -> Dict[str, Any]:
         """
-        Get information about the loaded reranking model.
+        Get information about the embedding-based reranking.
         
         Returns:
             Dictionary with model information and status
         """
         return {
-            "model_name": self.model_name,
-            "model_type": "ollama",
+            "model_name": self.embedding_model,
+            "model_type": "embedding_similarity",
             "base_url": self.base_url,
             "provider": "ollama",
-            "gpu_accelerated": True,  # Ollama handles GPU acceleration
-            "quantization": "Q8_0" if "Q8_0" in self.model_name else "unknown",
-            "architecture": "Qwen3-Reranker",
-            "compatibility": "GTX 1080 Ti verified",
-            "memory_usage": "~639MB VRAM (Q8_0)",
+            "gpu_accelerated": True,
+            "approach": "cosine_similarity",
+            "architecture": "Qwen3-Embedding",
+            "compatibility": "Docker networking verified",
+            "memory_usage": "~2.8GB VRAM (Q5_K_M)",
             "available": self._model_available,
         }
 
     async def health_check(self) -> Dict[str, Any]:
         """
-        Perform comprehensive health check of the Ollama reranker service.
+        Perform health check of the embedding-based reranker.
         
         Returns:
             Health status information
         """
         health_info = {
-            "service": "ollama_reranker",
-            "model": self.model_name,
+            "service": "ollama_embedding_reranker",
+            "model": self.embedding_model,
             "status": "unknown",
             "details": {}
         }
         
         try:
-            # Check service connectivity
             await self._client.get(f"{self.base_url}/api/version", timeout=5.0)
             health_info["details"]["service_accessible"] = True
             
-            # Check model availability
             is_available = await self.is_available()
             health_info["details"]["model_available"] = is_available
             
             if is_available:
-                # Test basic functionality with a simple query
-                test_score = await self._get_relevance_score(
-                    "test query", 
-                    "test document content"
-                )
-                health_info["details"]["functional_test"] = test_score > 0
-                health_info["details"]["test_score"] = test_score
+                # Test embedding functionality
+                test_embedding = await self._get_embedding("test")
+                health_info["details"]["embedding_functional"] = len(test_embedding) > 0
+                health_info["details"]["embedding_dimensions"] = len(test_embedding)
                 
                 health_info["status"] = "healthy"
             else:
@@ -308,9 +293,10 @@ Respond with just the numerical score (e.g., 0.85):"""
         except Exception as e:
             health_info["status"] = "error"
             health_info["details"]["error"] = str(e)
-            logger.error(f"Ollama reranker health check failed: {e}")
+            logger.error(f"Ollama embedding reranker health check failed: {e}")
         
         return health_info
+
 
 
 async def create_ollama_reranker(

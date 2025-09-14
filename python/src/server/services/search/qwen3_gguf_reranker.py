@@ -101,27 +101,20 @@ class Qwen3GGUFReranker:
 
     def _build_reranking_prompt(self, query: str, document: str) -> str:
         """
-        Build a prompt for binary relevance classification.
+        Build a prompt for binary relevance classification using official Qwen3-Reranker format.
+        
+        Uses the official Qwen3-Reranker template from Hugging Face:
+        "<Instruct>: {instruction}\n\n<Query>: {query}\n\n<Document>: {doc}"
         
         Args:
             query: Search query
             document: Document content to evaluate
             
         Returns:
-            Formatted prompt for the model
+            Formatted prompt for the model (expects "yes" or "no" response)
         """
-        return f"""<|im_start|>system
-Judge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>
-<|im_start|>user
-Query: {query}
-Document: {document}
-Instruct: {self.instruction}<|im_end|>
-<|im_start|>assistant
-<think>
+        return f"<Instruct>: {self.instruction}\n\n<Query>: {query}\n\n<Document>: {document}"
 
-</think>
-
-"""
 
     def _extract_relevance_score(self, response: str) -> float:
         """
